@@ -1,13 +1,18 @@
 package main
 
 import (
+	"database/sql"
 	"fmt"
-	"github.com/joho/godotenv"
 	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/joho/godotenv"
 )
 
 func main() {
-	database, err := InitDB("./galleryDB.db")
+	database, err := InitDB("./gallery.db")
 	if err != nil {
 		fmt.Printf("", err)
 	}
@@ -31,22 +36,52 @@ func main() {
 		return
 	}
 
-	// TEST: PASS
-	testFile := "test3.jpg"
-	testPath := "./assets/" + testFile
-
-	fmt.Println("Processing new upload...")
-	err = ProcessNewUpload(database, apiKey, userName, testFile, testPath)
+	err = ProcessGalleryDirectory(database, apiKey, userName, "./Gallery/")
 	if err != nil {
-		fmt.Printf("Upload Error: %v\n", err)
+		fmt.Printf("", err)
 	}
 
-	fmt.Println("\nFetching from Database...")
-	profile, err := GetApprovedMetadata(database, testFile)
+	topTags, err := GetActiveTagStats(database, 5)
 	if err != nil {
-		fmt.Printf("Query Error: %v\n", err)
-	} else {
-		fmt.Printf("Success! Loaded Profile from DB.\nSource: %s\nRating: %s\nDimensions: %dx%d\n",
-			profile.Source, profile.Rating, profile.ImageWidth, profile.ImageHeight)
+		fmt.Printf("Error: %v\n", err)
+		return
 	}
+
+	fmt.Printf("%-30s | %-15s | %s\n", "TAG NAME", "CATEGORY", "COUNT")
+	fmt.Println(strings.Repeat("-", 60))
+
+	for _, t := range topTags {
+		fmt.Printf("%-30s | %-15s | %d\n", t.Name, t.Category, t.Count)
+	}
+}
+
+func ProcessGalleryDirectory(db *sql.DB, apikey, userName, dirPath string) error {
+	entries, err := os.ReadDir(dirPath)
+	if err != nil {
+		return err
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+
+		fileName := entry.Name()
+		ext := strings.ToLower(filepath.Ext(fileName))
+
+		if ext != ".jpg" && ext != ".jpeg" && ext != ".png" && ext != ".webp" {
+			continue
+		}
+
+		filePath := filepath.Join(dirPath, fileName)
+
+		err := ProcessNewUpload(db, apikey, userName, fileName, filePath)
+		if err != nil {
+			return err
+		}
+
+		time.Sleep(1 * time.Second) // for rate limits
+	}
+
+	return nil
 }

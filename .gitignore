@@ -1,9 +1,9 @@
 # General
-assets/
+Gallery/
 .DS_Store
 notes.txt
 response.json
-galleryDB.db
+gallery.db
 
 # Binaries for programs and plugins
 *.exe

@@ -4,9 +4,17 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"strings"
 
 	_ "github.com/mattn/go-sqlite3"
 )
+
+// holds the usage statistics for a single tag
+type TagStat struct {
+	Name     string
+	Category string
+	Count    int
+}
 
 func InitDB(dbPath string) (*sql.DB, error) {
 	db, err := sql.Open("sqlite3", dbPath)
@@ -90,7 +98,7 @@ func ProcessNewUpload(db *sql.DB, apiKey, userName, filename, filePath string) e
 	var existingFilename string
 	err = db.QueryRow("SELECT filename FROM files WHERE hash = ?", hash).Scan(&existingFilename)
 	if err == nil {
-		fmt.Printf("Duplicate detected! This image is already saved as %s\n", existingFilename)
+		fmt.Printf("Duplicate detected! %s already saved as %s\n", filename, existingFilename)
 		return nil
 	}
 
@@ -133,6 +141,12 @@ func ProcessNewUpload(db *sql.DB, apiKey, userName, filename, filePath string) e
 
 		recordID, _ := result.LastInsertId()
 
+		saveTags(db, recordID, match.Post.TagsArtist, "artist")
+		saveTags(db, recordID, match.Post.TagsCharacters, "character")
+		saveTags(db, recordID, match.Post.TagsCopyright, "copyright")
+		saveTags(db, recordID, match.Post.TagsGeneral, "general")
+		saveTags(db, recordID, match.Post.TagsMeta, "meta")
+
 		if match.Score > highestScore {
 			highestScore = match.Score
 			bestRecordID = recordID
@@ -145,9 +159,9 @@ func ProcessNewUpload(db *sql.DB, apiKey, userName, filename, filePath string) e
 		if err != nil {
 			return fmt.Errorf("failed to lock in active metadata: %w", err)
 		}
-		fmt.Printf("🎉 Auto-verified match locked in! (Score: %.2f)\n", highestScore)
+		fmt.Printf("Auto-verified match locked in! (Score: %.2f)\n", highestScore)
 	} else {
-		fmt.Printf("⚠️ No 95%%+ match found. Saved %d potential matches to the verification queue.\n", len(matches))
+		fmt.Printf("No 95%%+ match found. Saved %d potential matches to the verification queue.\n", len(matches))
 	}
 
 	return nil
@@ -187,4 +201,69 @@ func GetApprovedMetadata(db *sql.DB, filename string) (*Post, error) {
 	fmt.Sscanf(providerID, "%d", &post.ID)
 
 	return &post, nil
+}
+
+// Pass 0 for the limit in order to get all of them
+func GetActiveTagStats(db *sql.DB, limit int) ([]TagStat, error) {
+	query := `
+		SELECT t.name, t.category, COUNT(rt.metadata_id) as usage_count
+		FROM tags t
+		JOIN record_tags rt ON t.id = rt.tag_id
+		JOIN files f ON f.active_metadata_id = rt.metadata_id
+		GROUP BY t.id
+		ORDER BY usage_count DESC
+	`
+
+	if limit > 0 {
+		query += fmt.Sprintf(" LIMIT %d", limit)
+	}
+
+	rows, err := db.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query tag stats: %w", err)
+	}
+	defer rows.Close()
+
+	var stats []TagStat
+
+	for rows.Next() {
+		var stat TagStat
+		if err := rows.Scan(&stat.Name, &stat.Category, &stat.Count); err != nil {
+			return nil, fmt.Errorf("failed to scan tag row: %w", err)
+		}
+		stats = append(stats, stat)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("row iteration error: %w", err)
+	}
+
+	return stats, nil
+}
+
+// inserts tags into the dictionary and links them to the metadata record
+func saveTags(db *sql.DB, recordID int64, tags []string, category string) {
+	for _, tagName := range tags {
+		if strings.TrimSpace(tagName) == "" {
+			continue
+		}
+
+		_, err := db.Exec("INSERT OR IGNORE INTO tags (name, category) VALUES (?, ?)", tagName, category)
+		if err != nil {
+			fmt.Printf("Error inserting tag '%s': %v\n", tagName, err)
+			continue
+		}
+
+		var tagID int64
+		err = db.QueryRow("SELECT id FROM tags WHERE name = ?", tagName).Scan(&tagID)
+		if err != nil {
+			fmt.Printf("Error fetching tag ID for '%s': %v\n", tagName, err)
+			continue
+		}
+
+		_, err = db.Exec("INSERT OR IGNORE INTO record_tags (metadata_id, tag_id) VALUES (?, ?)", recordID, tagID)
+		if err != nil {
+			fmt.Printf("Error linking tag '%s' to record %d: %v\n", tagName, recordID, err)
+		}
+	}
 }
