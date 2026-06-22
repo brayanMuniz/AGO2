@@ -3,6 +3,7 @@ assets/
 .DS_Store
 notes.txt
 response.json
+galleryDB.db
 
 # Binaries for programs and plugins
 *.exe
