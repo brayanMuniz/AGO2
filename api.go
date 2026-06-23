@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -29,9 +32,9 @@ func (a *App) handleGetImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	idStr := r.URL.Query().Get("id")
+	idStr := r.PathValue("id")
 	if idStr == "" {
-		sendJSONError(w, "Missing 'id' query parameter", http.StatusBadRequest)
+		sendJSONError(w, "Missing 'id' path parameter", http.StatusBadRequest)
 		return
 	}
 
@@ -87,4 +90,68 @@ func (a *App) handleSearch(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(images)
+}
+
+// POST /api/process-gallery
+func (a *App) handleProcessGallery(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		sendJSONError(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	apiKey := os.Getenv("DANBOORU_KEY")
+	userName := os.Getenv("USERNAME")
+
+	if apiKey == "" || userName == "" {
+		fmt.Println("Error: API credentials missing from environment variables.")
+		sendJSONError(w, "Server configuration error", http.StatusInternalServerError)
+		return
+	}
+
+	targetDir := "./Gallery/"
+
+	err := ProcessGalleryDirectory(a.DB, apiKey, userName, targetDir)
+	if err != nil {
+		fmt.Printf("Error processing gallery: %v\n", err)
+		sendJSONError(w, "Failed to process gallery", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"message": "Successfully processed gallery: ",
+	})
+}
+
+// OPTIMIZE: Add Go routines
+func ProcessGalleryDirectory(db *sql.DB, apikey, userName, dirPath string) error {
+	entries, err := os.ReadDir(dirPath)
+	if err != nil {
+		return err
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+
+		fileName := entry.Name()
+		ext := strings.ToLower(filepath.Ext(fileName))
+
+		if ext != ".jpg" && ext != ".jpeg" && ext != ".png" && ext != ".webp" {
+			continue
+		}
+
+		filePath := filepath.Join(dirPath, fileName)
+
+		err := ProcessNewUpload(db, apikey, userName, fileName, filePath)
+		if err != nil {
+			return err
+		}
+
+		time.Sleep(1 * time.Second) // for rate limits
+	}
+
+	return nil
 }

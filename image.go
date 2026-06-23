@@ -4,21 +4,22 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"image"
-	"image/draw" // Used in GetPixelHash
+	"image/draw"
 	_ "image/gif"
-	"image/jpeg" // Removed the '_' so we can call jpeg.Encode()
+	"image/jpeg"
 	_ "image/png"
 	"os"
-	"path/filepath" // Added for path manipulation
+	"path/filepath"
 	"strings"
 
 	_ "golang.org/x/image/bmp"
-	xdraw "golang.org/x/image/draw" // Aliased so it doesn't conflict with standard 'draw'
+	xdraw "golang.org/x/image/draw"
 	_ "golang.org/x/image/tiff"
 	_ "golang.org/x/image/webp"
 )
 
 type Image struct {
+	ID            int64       `json:"id"`
 	FileName      string      `json:"file_name"`
 	Hash          string      `json:"hash"`
 	MainData      *Post       `json:"main_data"`
@@ -68,8 +69,7 @@ func GenerateThumbnail(originalPath, thumbnailDir string) (string, error) {
 	srcW := bounds.Dx()
 	srcH := bounds.Dy()
 
-	// Calculate target dimensions keeping aspect ratio (Max 150px)
-	maxDim := 150
+	maxDim := 1000 // amount of pixels
 	dstW, dstH := maxDim, maxDim
 	if srcW > srcH {
 		dstH = (srcH * maxDim) / srcW
@@ -79,20 +79,15 @@ func GenerateThumbnail(originalPath, thumbnailDir string) (string, error) {
 
 	// Create a blank canvas for the thumbnail
 	dstImg := image.NewRGBA(image.Rect(0, 0, dstW, dstH))
-
-	// --- THE FIX: Paint the canvas white before drawing ---
 	white := image.NewUniform(image.White)
 	draw.Draw(dstImg, dstImg.Bounds(), white, image.Point{}, draw.Src)
-	// ------------------------------------------------------
 
 	// Scale the original image down to the thumbnail size over the white background
 	xdraw.BiLinear.Scale(dstImg, dstImg.Bounds(), srcImg, bounds, xdraw.Over, nil)
-
 	if err := os.MkdirAll(thumbnailDir, os.ModePerm); err != nil {
 		return "", err
 	}
 
-	// Generate a unique thumbnail filename without the double extension
 	baseName := filepath.Base(originalPath)
 	ext := filepath.Ext(baseName)
 	nameWithoutExt := strings.TrimSuffix(baseName, ext)

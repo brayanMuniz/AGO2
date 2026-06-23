@@ -1,13 +1,9 @@
 package main
 
 import (
-	"database/sql"
 	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
-	"strings"
-	"time"
 
 	"github.com/joho/godotenv"
 )
@@ -19,21 +15,9 @@ func main() {
 	}
 	defer database.Close()
 
-	app := &App{
-		DB: database,
-	}
-
-	http.HandleFunc("/api/image", app.handleGetImage)
-	http.HandleFunc("/api/search", app.handleSearch)
-
-	port := ":8080"
-	fmt.Printf("Server is running on http://localhost%s\n", port)
-
-	err = http.ListenAndServe(port, nil)
-	if err != nil {
-		fmt.Println("Server failed to start: %v\n", err)
-		return
-	}
+	// reroute images for frontend
+	http.Handle("/images/", http.StripPrefix("/images/", http.FileServer(http.Dir("./Gallery"))))
+	http.Handle("/thumbnails/", http.StripPrefix("/thumbnails/", http.FileServer(http.Dir("./thumbnails"))))
 
 	err = godotenv.Load("./.env")
 	if err != nil {
@@ -53,40 +37,20 @@ func main() {
 		return
 	}
 
-	// err = ProcessGalleryDirectory(database, apiKey, userName, "./Gallery/")
-	// if err != nil {
-	// 	fmt.Printf("", err)
-	// }
-}
+	app := &App{
+		DB: database,
+	}
 
-// OPTIMIZE: Add Go routines
-func ProcessGalleryDirectory(db *sql.DB, apikey, userName, dirPath string) error {
-	entries, err := os.ReadDir(dirPath)
+	http.HandleFunc("/api/image/{id}", app.handleGetImage)
+	http.HandleFunc("/api/search", app.handleSearch)
+	http.HandleFunc("/api/process-gallery", app.handleProcessGallery)
+
+	port := ":8080"
+	fmt.Printf("Server is running on http://localhost%s\n", port)
+
+	err = http.ListenAndServe(port, nil)
 	if err != nil {
-		return err
+		fmt.Println("Server failed to start: %v\n", err)
+		return
 	}
-
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-
-		fileName := entry.Name()
-		ext := strings.ToLower(filepath.Ext(fileName))
-
-		if ext != ".jpg" && ext != ".jpeg" && ext != ".png" && ext != ".webp" {
-			continue
-		}
-
-		filePath := filepath.Join(dirPath, fileName)
-
-		err := ProcessNewUpload(db, apikey, userName, fileName, filePath)
-		if err != nil {
-			return err
-		}
-
-		time.Sleep(1 * time.Second) // for rate limits
-	}
-
-	return nil
 }

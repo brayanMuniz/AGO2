@@ -94,6 +94,7 @@ func createTables(db *sql.DB) error {
 	return err
 }
 
+// WARNING: stops /api call when a duplicate is detected
 // OPTIMIZE: If in the future this is too slow use a transaction instead
 func ProcessNewUpload(db *sql.DB, apiKey, userName, filename, filePath string) error {
 	hash, err := GetPixelHash(filePath)
@@ -295,6 +296,7 @@ func saveTags(db *sql.DB, recordID int64, tags []string, category string) {
 func GetImageByID(db *sql.DB, fileID int64, includeMatches bool) (*Image, error) {
 	var img Image
 	var activeMetadataID sql.NullInt64
+	img.ID = fileID
 
 	err := db.QueryRow("SELECT filename, hash, active_metadata_id, IFNULL(thumbnail_path, '') FROM files WHERE id = ?", fileID).
 		Scan(&img.FileName, &img.Hash, &activeMetadataID, &img.ThumbnailPath)

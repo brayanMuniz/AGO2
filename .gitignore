@@ -6,6 +6,7 @@ thumbnails/
 notes.txt
 response.json
 gallery.db
+.air.toml
 
 # Binaries for programs and plugins
 *.exe
