@@ -17,8 +17,8 @@ import (
 type Image struct {
 	FileName    string
 	Hash        string
-	MainData    Post
-	IQDBMathces []IQDBMatch
+	MainData    *Post
+	IQDBMatches []IQDBMatch
 }
 
 func GetPixelHash(filePath string) (string, error) {
@@ -28,7 +28,7 @@ func GetPixelHash(filePath string) (string, error) {
 	}
 	defer f.Close()
 
-	img, _, err := image.Decode(f) // removes metadata
+	img, _, err := image.Decode(f) // removes metadata from image
 	if err != nil {
 		return "", err
 	}

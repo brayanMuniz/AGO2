@@ -36,25 +36,13 @@ func main() {
 		return
 	}
 
-	err = ProcessGalleryDirectory(database, apiKey, userName, "./Gallery/")
-	if err != nil {
-		fmt.Printf("", err)
-	}
-
-	topTags, err := GetActiveTagStats(database, 5)
-	if err != nil {
-		fmt.Printf("Error: %v\n", err)
-		return
-	}
-
-	fmt.Printf("%-30s | %-15s | %s\n", "TAG NAME", "CATEGORY", "COUNT")
-	fmt.Println(strings.Repeat("-", 60))
-
-	for _, t := range topTags {
-		fmt.Printf("%-30s | %-15s | %d\n", t.Name, t.Category, t.Count)
-	}
+	// err = ProcessGalleryDirectory(database, apiKey, userName, "./Gallery/")
+	// if err != nil {
+	// 	fmt.Printf("", err)
+	// }
 }
 
+// OPTIMIZE: Add Go routines
 func ProcessGalleryDirectory(db *sql.DB, apikey, userName, dirPath string) error {
 	entries, err := os.ReadDir(dirPath)
 	if err != nil {
