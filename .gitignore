@@ -1,5 +1,7 @@
 # General
 Gallery/
+tmp/
+thumbnails/
 .DS_Store
 notes.txt
 response.json

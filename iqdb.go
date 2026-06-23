@@ -21,6 +21,34 @@ type IQDBMatch struct {
 	Post   Post    `json:"post"`
 }
 
+// MarshalJSON customizes the JSON output to hide specific fields from the frontend response
+func (p *Post) MarshalJSON() ([]byte, error) {
+	// Create an alias to prevent infinite loops during marshaling
+	type Alias Post
+
+	return json.Marshal(&struct {
+		*Alias
+		// We shadow the fields we want to hide and add 'omitempty'
+		FileURL               string `json:"file_url,omitempty"`
+		LargeFileURL          string `json:"large_file_url,omitempty"`
+		RawTagStringArtist    string `json:"tag_string_artist,omitempty"`
+		RawTagStringCharacter string `json:"tag_string_character,omitempty"`
+		RawTagStringCopyright string `json:"tag_string_copyright,omitempty"`
+		RawTagStringGeneral   string `json:"tag_string_general,omitempty"`
+		RawTagStringMeta      string `json:"tag_string_meta,omitempty"`
+	}{
+		Alias: (*Alias)(p),
+		// Setting these to empty strings triggers the 'omitempty' rule, erasing them from the JSON
+		FileURL:               "",
+		LargeFileURL:          "",
+		RawTagStringArtist:    "",
+		RawTagStringCharacter: "",
+		RawTagStringCopyright: "",
+		RawTagStringGeneral:   "",
+		RawTagStringMeta:      "",
+	})
+}
+
 // intercepts the default unmarshaling to run SplitRawStrings() automatically.
 func (m *IQDBMatch) UnmarshalJSON(data []byte) error {
 	// Create an alias type to prevent infinite loop recursion
@@ -40,20 +68,22 @@ func (m *IQDBMatch) UnmarshalJSON(data []byte) error {
 }
 
 type Post struct {
-	ID           int    `json:"id"`
-	FileURL      string `json:"file_url"`
-	LargeFileURL string `json:"large_file_url"`
-	Rating       string `json:"rating"` // general, sensitive, questionable, explicit
-	Source       string `json:"source"`
-	ImageHeight  int    `json:"image_height"`
-	ImageWidth   int    `json:"image_width"`
-	FileSize     int    `json:"file_size"`
+	ID int `json:"id"`
 
-	TagsArtist     []string
-	TagsCharacters []string
-	TagsCopyright  []string
-	TagsGeneral    []string
-	TagsMeta       []string
+	FileURL      string `json:"-"`
+	LargeFileURL string `json:"-"`
+
+	Rating      string `json:"rating"`
+	Source      string `json:"source"`
+	ImageHeight int    `json:"image_height"`
+	ImageWidth  int    `json:"image_width"`
+	FileSize    int    `json:"file_size"`
+
+	TagsArtist     []string `json:"tags_artist"`
+	TagsCharacters []string `json:"tags_character"`
+	TagsCopyright  []string `json:"tags_copyright"`
+	TagsGeneral    []string `json:"tags_general"`
+	TagsMeta       []string `json:"tags_meta"`
 
 	TagCount          int `json:"tag_count"`
 	TagCountArtist    int `json:"tag_count_artist"`

@@ -45,6 +45,7 @@ func createTables(db *sql.DB) error {
 		active_metadata_id INTEGER,
 		hasDuplicate INTEGER DEFAULT NULL,
 		isFavorite BOOLEAN DEFAULT FALSE,
+		thumbnail_path TEXT DEFAULT NULL,
 		
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		FOREIGN KEY (active_metadata_id) REFERENCES metadata_records (id) ON DELETE SET NULL,
@@ -122,6 +123,16 @@ func ProcessNewUpload(db *sql.DB, apiKey, userName, filename, filePath string) e
 	}
 	fmt.Printf("Saved new file record: %s\n", filename)
 
+	thumbPath, thumbErr := GenerateThumbnail(filePath, "thumbnails")
+	if thumbErr != nil {
+		fmt.Printf("Warning: failed to generate thumbnail for %s: %v\n", filename, thumbErr)
+	} else {
+		_, err = db.Exec("UPDATE files SET thumbnail_path = ? WHERE filename = ?", thumbPath, filename)
+		if err != nil {
+			fmt.Printf("Warning: failed to save thumbnail path to DB: %v\n", err)
+		}
+	}
+
 	matches, err := iqdb_upload_request(apiKey, userName, filePath)
 	if err != nil {
 		return fmt.Errorf("iqdb api failed: %w", err)
@@ -129,7 +140,6 @@ func ProcessNewUpload(db *sql.DB, apiKey, userName, filename, filePath string) e
 
 	var bestRecordID int64
 	var highestScore float64
-
 	for _, match := range matches {
 		query := `
 			INSERT INTO metadata_records 
@@ -282,12 +292,12 @@ func saveTags(db *sql.DB, recordID int64, tags []string, category string) {
 	}
 }
 
-func GetImageByID(db *sql.DB, fileID int64) (*Image, error) {
+func GetImageByID(db *sql.DB, fileID int64, includeMatches bool) (*Image, error) {
 	var img Image
 	var activeMetadataID sql.NullInt64
 
-	err := db.QueryRow("SELECT filename, hash, active_metadata_id FROM files WHERE id = ?", fileID).
-		Scan(&img.FileName, &img.Hash, &activeMetadataID)
+	err := db.QueryRow("SELECT filename, hash, active_metadata_id, IFNULL(thumbnail_path, '') FROM files WHERE id = ?", fileID).
+		Scan(&img.FileName, &img.Hash, &activeMetadataID, &img.ThumbnailPath)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("no file found with ID %d", fileID)
@@ -295,42 +305,47 @@ func GetImageByID(db *sql.DB, fileID int64) (*Image, error) {
 		return nil, fmt.Errorf("failed to fetch file data: %w", err)
 	}
 
-	// Fetch all metadata records associated with this file
-	query := `
-		SELECT 
-			id, provider_id, score, file_url, large_file_url, rating, 
-			source, image_height, image_width, file_size 
-		FROM metadata_records 
-		WHERE filename = ?
-	`
-	rows, err := db.Query(query, img.FileName)
+	var rows *sql.Rows
+
+	if includeMatches {
+		query := `
+			SELECT id, provider_id, score, file_url, large_file_url, rating, 
+			       source, image_height, image_width, file_size 
+			FROM metadata_records 
+			WHERE filename = ?
+		`
+		rows, err = db.Query(query, img.FileName)
+		img.IQDBMatches = make([]IQDBMatch, 0) // Initialize as [] so it isn't null
+	} else {
+		if !activeMetadataID.Valid {
+			return &img, nil
+		}
+		query := `
+			SELECT id, provider_id, score, file_url, large_file_url, rating, 
+			       source, image_height, image_width, file_size 
+			FROM metadata_records 
+			WHERE id = ?
+		`
+		rows, err = db.Query(query, activeMetadataID.Int64)
+	}
+
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch metadata records: %w", err)
+		return nil, fmt.Errorf("failed to query metadata records: %w", err)
 	}
 	defer rows.Close()
-
-	img.IQDBMatches = make([]IQDBMatch, 0)
 
 	for rows.Next() {
 		var recordID int64
 		var providerID string
-		var score sql.NullFloat64 // Nullable in case older records exist
+		var score sql.NullFloat64
 		var post Post
 
 		var rating, source, fileURL, largeFileURL sql.NullString
 		var imgHeight, imgWidth, fileSize sql.NullInt64
 
 		err := rows.Scan(
-			&recordID,
-			&providerID,
-			&score,
-			&fileURL,
-			&largeFileURL,
-			&rating,
-			&source,
-			&imgHeight,
-			&imgWidth,
-			&fileSize,
+			&recordID, &providerID, &score, &fileURL, &largeFileURL, &rating,
+			&source, &imgHeight, &imgWidth, &fileSize,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan metadata row: %w", err)
@@ -345,22 +360,22 @@ func GetImageByID(db *sql.DB, fileID int64) (*Image, error) {
 		post.ImageWidth = int(imgWidth.Int64)
 		post.FileSize = int(fileSize.Int64)
 
-		// Populate tags ONLY if this is the active metadata record
 		if activeMetadataID.Valid && recordID == activeMetadataID.Int64 {
 			err = populateTags(db, recordID, &post)
 			if err != nil {
 				return nil, fmt.Errorf("failed to populate tags for active record: %w", err)
 			}
-
-			mainPost := post // copy the value
+			mainPost := post
 			img.MainData = &mainPost
 		}
 
-		img.IQDBMatches = append(img.IQDBMatches, IQDBMatch{
-			PostID: post.ID,
-			Score:  score.Float64,
-			Post:   post,
-		})
+		if includeMatches {
+			img.IQDBMatches = append(img.IQDBMatches, IQDBMatch{
+				PostID: post.ID,
+				Score:  score.Float64,
+				Post:   post,
+			})
+		}
 	}
 
 	if err = rows.Err(); err != nil {
@@ -419,4 +434,61 @@ func populateTags(db *sql.DB, metadataID int64, post *Post) error {
 	post.TagCount = post.TagCountArtist + post.TagCountCharacter + post.TagCountCopyright + post.TagCountGeneral + post.TagCountMeta
 
 	return rows.Err()
+}
+
+func SearchImagesByTags(db *sql.DB, tags []string) ([]Image, error) {
+	if len(tags) == 0 {
+		return nil, fmt.Errorf("no tags provided for search")
+	}
+
+	// Build dynamic placeholders (?, ?, ?) based on the number of tags
+	placeholders := make([]string, len(tags))
+	args := make([]interface{}, len(tags))
+	for i, tag := range tags {
+		placeholders[i] = "?"
+		args[i] = tag
+	}
+
+	args = append(args, len(tags))
+
+	query := fmt.Sprintf(`
+		SELECT f.id 
+		FROM files f
+		JOIN record_tags rt ON f.active_metadata_id = rt.metadata_id
+		JOIN tags t ON rt.tag_id = t.id
+		WHERE t.name IN (%s)
+		GROUP BY f.id
+		HAVING COUNT(DISTINCT t.id) = ?
+	`, strings.Join(placeholders, ","))
+
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search tags: %w", err)
+	}
+	defer rows.Close()
+
+	var fileIDs []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("failed to scan file ID: %w", err)
+		}
+		fileIDs = append(fileIDs, id)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating tag search rows: %w", err)
+	}
+
+	var images []Image
+	for _, id := range fileIDs {
+		img, err := GetImageByID(db, id, false)
+		if err != nil {
+			fmt.Printf("Warning: failed to load image %d: %v\n", id, err)
+			continue
+		}
+		images = append(images, *img)
+	}
+
+	return images, nil
 }

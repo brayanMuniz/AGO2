@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,6 +18,22 @@ func main() {
 		fmt.Printf("", err)
 	}
 	defer database.Close()
+
+	app := &App{
+		DB: database,
+	}
+
+	http.HandleFunc("/api/image", app.handleGetImage)
+	http.HandleFunc("/api/search", app.handleSearch)
+
+	port := ":8080"
+	fmt.Printf("Server is running on http://localhost%s\n", port)
+
+	err = http.ListenAndServe(port, nil)
+	if err != nil {
+		fmt.Println("Server failed to start: %v\n", err)
+		return
+	}
 
 	err = godotenv.Load("./.env")
 	if err != nil {

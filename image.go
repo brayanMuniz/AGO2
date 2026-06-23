@@ -3,22 +3,27 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	_ "golang.org/x/image/bmp"
-	_ "golang.org/x/image/tiff"
-	_ "golang.org/x/image/webp"
 	"image"
-	"image/draw"
+	"image/draw" // Used in GetPixelHash
 	_ "image/gif"
-	_ "image/jpeg"
+	"image/jpeg" // Removed the '_' so we can call jpeg.Encode()
 	_ "image/png"
 	"os"
+	"path/filepath" // Added for path manipulation
+	"strings"
+
+	_ "golang.org/x/image/bmp"
+	xdraw "golang.org/x/image/draw" // Aliased so it doesn't conflict with standard 'draw'
+	_ "golang.org/x/image/tiff"
+	_ "golang.org/x/image/webp"
 )
 
 type Image struct {
-	FileName    string
-	Hash        string
-	MainData    *Post
-	IQDBMatches []IQDBMatch
+	FileName      string      `json:"file_name"`
+	Hash          string      `json:"hash"`
+	MainData      *Post       `json:"main_data"`
+	ThumbnailPath string      `json:"thumbnail_path"`
+	IQDBMatches   []IQDBMatch `json:"iqdb_matches,omitempty"`
 }
 
 func GetPixelHash(filePath string) (string, error) {
@@ -44,4 +49,68 @@ func GetPixelHash(filePath string) (string, error) {
 	hasher.Write(rgbaImg.Pix)
 
 	return hex.EncodeToString(hasher.Sum(nil)), nil
+}
+
+func GenerateThumbnail(originalPath, thumbnailDir string) (string, error) {
+	file, err := os.Open(originalPath)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	// Decode the original image configurations/pixels
+	srcImg, _, err := image.Decode(file)
+	if err != nil {
+		return "", err
+	}
+
+	bounds := srcImg.Bounds()
+	srcW := bounds.Dx()
+	srcH := bounds.Dy()
+
+	// Calculate target dimensions keeping aspect ratio (Max 150px)
+	maxDim := 150
+	dstW, dstH := maxDim, maxDim
+	if srcW > srcH {
+		dstH = (srcH * maxDim) / srcW
+	} else {
+		dstW = (srcW * maxDim) / srcH
+	}
+
+	// Create a blank canvas for the thumbnail
+	dstImg := image.NewRGBA(image.Rect(0, 0, dstW, dstH))
+
+	// --- THE FIX: Paint the canvas white before drawing ---
+	white := image.NewUniform(image.White)
+	draw.Draw(dstImg, dstImg.Bounds(), white, image.Point{}, draw.Src)
+	// ------------------------------------------------------
+
+	// Scale the original image down to the thumbnail size over the white background
+	xdraw.BiLinear.Scale(dstImg, dstImg.Bounds(), srcImg, bounds, xdraw.Over, nil)
+
+	if err := os.MkdirAll(thumbnailDir, os.ModePerm); err != nil {
+		return "", err
+	}
+
+	// Generate a unique thumbnail filename without the double extension
+	baseName := filepath.Base(originalPath)
+	ext := filepath.Ext(baseName)
+	nameWithoutExt := strings.TrimSuffix(baseName, ext)
+
+	thumbFilename := "thumb_" + nameWithoutExt + ".jpg"
+	outPath := filepath.Join(thumbnailDir, thumbFilename)
+
+	outFile, err := os.Create(outPath)
+	if err != nil {
+		return "", err
+	}
+	defer outFile.Close()
+
+	// Save with 80% JPEG quality
+	err = jpeg.Encode(outFile, dstImg, &jpeg.Options{Quality: 80})
+	if err != nil {
+		return "", err
+	}
+
+	return outPath, nil
 }
