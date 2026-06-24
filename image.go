@@ -69,7 +69,7 @@ func GenerateThumbnail(originalPath, thumbnailDir string) (string, error) {
 	srcW := bounds.Dx()
 	srcH := bounds.Dy()
 
-	maxDim := 1000 // amount of pixels
+	maxDim := 1250 // amount of pixels
 	dstW, dstH := maxDim, maxDim
 	if srcW > srcH {
 		dstH = (srcH * maxDim) / srcW

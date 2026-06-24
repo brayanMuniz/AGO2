@@ -120,8 +120,9 @@ func (a *App) handleProcessGallery(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{
-		"message": "Successfully processed gallery: ",
+		"message": "Successfully processed Gallery Directory",
 	})
+	fmt.Println("Finished processing POST /api/process-gallery")
 }
 
 // OPTIMIZE: Add Go routines
@@ -138,14 +139,13 @@ func ProcessGalleryDirectory(db *sql.DB, apikey, userName, dirPath string) error
 
 		fileName := entry.Name()
 		ext := strings.ToLower(filepath.Ext(fileName))
-
 		if ext != ".jpg" && ext != ".jpeg" && ext != ".png" && ext != ".webp" {
 			continue
 		}
 
 		filePath := filepath.Join(dirPath, fileName)
 
-		err := ProcessNewUpload(db, apikey, userName, fileName, filePath)
+		err := ProcessNewImageUpload(db, apikey, userName, fileName, filePath)
 		if err != nil {
 			return err
 		}

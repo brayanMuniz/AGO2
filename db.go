@@ -96,18 +96,18 @@ func createTables(db *sql.DB) error {
 
 // WARNING: stops /api call when a duplicate is detected
 // OPTIMIZE: If in the future this is too slow use a transaction instead
-func ProcessNewUpload(db *sql.DB, apiKey, userName, filename, filePath string) error {
+func ProcessNewImageUpload(db *sql.DB, apiKey, userName, filename, filePath string) error {
 	hash, err := GetPixelHash(filePath)
 	if err != nil {
 		return fmt.Errorf("failed to hash image: %w", err)
 	}
 
-	// Checks for an existing original file (where hasDuplicate is NULL)
+	// Checks for an existing original file
 	var existingID int64
 	var existingFilename string
 	err = db.QueryRow("SELECT id, filename FROM files WHERE hash = ? AND hasDuplicate IS NULL", hash).Scan(&existingID, &existingFilename)
 	if err == nil {
-		fmt.Printf("Duplicate detected! %s already saved as %s\n", filename, existingFilename)
+		fmt.Printf("Duplicate: %s already saved as %s\n", filename, existingFilename)
 
 		// Log the duplicate in the database pointing to the original ID
 		_, err = db.Exec("INSERT INTO files (filename, hash, hasDuplicate, isFavorite) VALUES (?, ?, ?, FALSE)", filename, hash, existingID)

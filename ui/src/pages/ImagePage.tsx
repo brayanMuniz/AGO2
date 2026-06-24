@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
+import DuplicateImageNotice from '../components/DuplicateImageNotice';
 
 // --- Types ---
 // Mapped directly from your Go backend structs
@@ -29,7 +30,7 @@ interface ImageData {
   id: number;
   file_name: string;
   hash: string;
-  main_data: Post;
+  main_data: Post | null;
   thumbnail_path: string;
 }
 
@@ -108,6 +109,16 @@ const ImagePage: React.FC = () => {
       <div className="min-h-screen bg-[#111115] text-white flex items-center justify-center">
         <span className="text-red-400 text-lg">{error || "Data unavailable"}</span>
       </div>
+    );
+  }
+
+  if (!imageData.main_data) {
+    return (
+      <DuplicateImageNotice
+        fileName={imageData.file_name}
+        hash={imageData.hash}
+        imageId={imageData.id}
+      />
     );
   }
 
