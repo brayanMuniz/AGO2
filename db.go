@@ -3,7 +3,11 @@ package main
 import (
 	"database/sql"
 	"fmt"
+	"io"
 	"log"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -94,7 +98,6 @@ func createTables(db *sql.DB) error {
 	return err
 }
 
-// WARNING: stops /api call when a duplicate is detected
 // OPTIMIZE: If in the future this is too slow use a transaction instead
 func ProcessNewImageUpload(db *sql.DB, apiKey, userName, filename, filePath string) error {
 	hash, err := GetPixelHash(filePath)
@@ -298,8 +301,8 @@ func GetImageByID(db *sql.DB, fileID int64, includeMatches bool) (*Image, error)
 	var activeMetadataID sql.NullInt64
 	img.ID = fileID
 
-	err := db.QueryRow("SELECT filename, hash, active_metadata_id, IFNULL(thumbnail_path, '') FROM files WHERE id = ?", fileID).
-		Scan(&img.FileName, &img.Hash, &activeMetadataID, &img.ThumbnailPath)
+	err := db.QueryRow("SELECT filename, hash, isFavorite, active_metadata_id, IFNULL(thumbnail_path, '') FROM files WHERE id = ?", fileID).
+		Scan(&img.FileName, &img.Hash, &img.IsFavorite, &activeMetadataID, &img.ThumbnailPath)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("no file found with ID %d", fileID)
@@ -438,34 +441,127 @@ func populateTags(db *sql.DB, metadataID int64, post *Post) error {
 	return rows.Err()
 }
 
-func SearchImagesByTags(db *sql.DB, tags []string) ([]Image, error) {
-	if len(tags) == 0 {
-		return nil, fmt.Errorf("no tags provided for search")
+func SearchImagesByTags(db *sql.DB, searchTokens []string) ([]Image, error) {
+	if len(searchTokens) == 0 {
+		return nil, fmt.Errorf("no search tokens provided")
 	}
 
-	// Build dynamic placeholders (?, ?, ?) based on the number of tags
-	placeholders := make([]string, len(tags))
-	args := make([]interface{}, len(tags))
-	for i, tag := range tags {
-		placeholders[i] = "?"
-		args[i] = tag
+	var normalTags []string
+	var ratings []string
+	var isFavoriteFilter *bool // Pointer to differentiate between not-provided and false
+
+	// Base query joining files to metadata_records
+	query := "SELECT f.id FROM files f JOIN metadata_records m ON f.active_metadata_id = m.id"
+	var whereClauses []string
+	var args []interface{}
+
+	// Inline helper to parse numeric prefixes (width, height, size) with operators (>, <, >=, <=)
+	parseNumericToken := func(column, token, prefix string) error {
+		valStr := strings.TrimPrefix(token, prefix)
+		op := "="
+
+		// Detect and extract mathematical operators
+		if strings.HasPrefix(valStr, ">=") {
+			op = ">="
+			valStr = valStr[2:]
+		} else if strings.HasPrefix(valStr, "<=") {
+			op = "<="
+			valStr = valStr[2:]
+		} else if strings.HasPrefix(valStr, ">") {
+			op = ">"
+			valStr = valStr[1:]
+		} else if strings.HasPrefix(valStr, "<") {
+			op = "<"
+			valStr = valStr[1:]
+		}
+
+		// Convert to integer to prevent SQL injection and ensure valid data
+		val, err := strconv.Atoi(valStr)
+		if err != nil {
+			return fmt.Errorf("invalid numeric value in search token: '%s'", token)
+		}
+
+		whereClauses = append(whereClauses, fmt.Sprintf("m.%s %s ?", column, op))
+		args = append(args, val)
+		return nil
 	}
 
-	args = append(args, len(tags))
+	// Separate tokens into categories
+	for _, token := range searchTokens {
+		lowerToken := strings.ToLower(strings.TrimSpace(token))
 
-	query := fmt.Sprintf(`
-		SELECT f.id 
-		FROM files f
-		JOIN record_tags rt ON f.active_metadata_id = rt.metadata_id
-		JOIN tags t ON rt.tag_id = t.id
-		WHERE t.name IN (%s)
-		GROUP BY f.id
-		HAVING COUNT(DISTINCT t.id) = ?
-	`, strings.Join(placeholders, ","))
+		if strings.HasPrefix(lowerToken, "rating:") {
+			ratings = append(ratings, strings.TrimPrefix(lowerToken, "rating:"))
+		} else if strings.HasPrefix(lowerToken, "width:") {
+			if err := parseNumericToken("image_width", lowerToken, "width:"); err != nil {
+				return nil, err
+			}
+		} else if strings.HasPrefix(lowerToken, "height:") {
+			if err := parseNumericToken("image_height", lowerToken, "height:"); err != nil {
+				return nil, err
+			}
+		} else if strings.HasPrefix(lowerToken, "size:") {
+			if err := parseNumericToken("file_size", lowerToken, "size:"); err != nil {
+				return nil, err
+			}
+		} else if strings.HasPrefix(lowerToken, "favorite:") {
+			valStr := strings.TrimPrefix(lowerToken, "favorite:")
+			favVal, err := strconv.ParseBool(valStr)
+			if err != nil {
+				return nil, fmt.Errorf("invalid boolean value in search token: '%s'", token)
+			}
+			isFavoriteFilter = &favVal
+		} else {
+			normalTags = append(normalTags, strings.TrimSpace(token))
+		}
+	}
 
+	// Handle Rating Filters
+	if len(ratings) > 0 {
+		placeholders := make([]string, len(ratings))
+		for i, r := range ratings {
+			placeholders[i] = "?"
+			args = append(args, r)
+		}
+		// Uses IN () so multiple ratings act as an OR (e.g., rating:g OR rating:s)
+		whereClauses = append(whereClauses, fmt.Sprintf("LOWER(m.rating) IN (%s)", strings.Join(placeholders, ",")))
+	}
+
+	// Handle Favorite Filter
+	if isFavoriteFilter != nil {
+		whereClauses = append(whereClauses, "f.isFavorite = ?")
+		args = append(args, *isFavoriteFilter)
+	}
+
+	// Handle Tag Filters
+	if len(normalTags) > 0 {
+		query += `
+			JOIN record_tags rt ON m.id = rt.metadata_id
+			JOIN tags t ON rt.tag_id = t.id`
+
+		placeholders := make([]string, len(normalTags))
+		for i, tag := range normalTags {
+			placeholders[i] = "?"
+			args = append(args, tag)
+		}
+		whereClauses = append(whereClauses, fmt.Sprintf("t.name IN (%s)", strings.Join(placeholders, ",")))
+	}
+
+	// Append WHERE conditions
+	if len(whereClauses) > 0 {
+		query += " WHERE " + strings.Join(whereClauses, " AND ")
+	}
+
+	// Append GROUP BY / HAVING only if we are actually checking tags
+	if len(normalTags) > 0 {
+		query += " GROUP BY f.id HAVING COUNT(DISTINCT t.id) = ?"
+		args = append(args, len(normalTags))
+	}
+
+	// Execute query
 	rows, err := db.Query(query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to search tags: %w", err)
+		return nil, fmt.Errorf("failed to search: %w", err)
 	}
 	defer rows.Close()
 
@@ -479,9 +575,10 @@ func SearchImagesByTags(db *sql.DB, tags []string) ([]Image, error) {
 	}
 
 	if err = rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating tag search rows: %w", err)
+		return nil, fmt.Errorf("error iterating search rows: %w", err)
 	}
 
+	// Fetch full image records
 	var images []Image
 	for _, id := range fileIDs {
 		img, err := GetImageByID(db, id, false)
@@ -493,4 +590,135 @@ func SearchImagesByTags(db *sql.DB, tags []string) ([]Image, error) {
 	}
 
 	return images, nil
+}
+
+func DeleteImageByID(db *sql.DB, fileID int64, galleryDir string) error {
+	var filename string
+	var thumbnailPath sql.NullString
+
+	err := db.QueryRow("SELECT filename, thumbnail_path FROM files WHERE id = ?", fileID).
+		Scan(&filename, &thumbnailPath)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("no file found with ID %d", fileID)
+		}
+		return fmt.Errorf("failed to fetch file data for deletion: %w", err)
+	}
+
+	_, err = db.Exec("DELETE FROM files WHERE id = ?", fileID)
+	if err != nil {
+		return fmt.Errorf("failed to delete database record: %w", err)
+	}
+
+	imagePath := filepath.Join(galleryDir, filename)
+	if err := os.Remove(imagePath); err != nil && !os.IsNotExist(err) {
+		fmt.Printf("Warning: failed to delete physical image file %s: %v\n", imagePath, err)
+	}
+
+	if thumbnailPath.Valid && thumbnailPath.String != "" {
+		if err := os.Remove(thumbnailPath.String); err != nil && !os.IsNotExist(err) {
+			fmt.Printf("Warning: failed to delete physical thumbnail file %s: %v\n", thumbnailPath.String, err)
+		}
+	}
+
+	fmt.Printf("Successfully deleted image record and files for: %s\n", filename)
+	return nil
+}
+
+func UpdateImageFavoriteStatus(db *sql.DB, fileID int64, isFavorite bool) error {
+	// verify the image exists to avoid silent failures
+	var exists bool
+	err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM files WHERE id = ?)", fileID).Scan(&exists)
+	if err != nil {
+		return fmt.Errorf("failed to check image existence: %w", err)
+	}
+	if !exists {
+		return fmt.Errorf("no file found with ID %d", fileID)
+	}
+
+	// Execute the update
+	_, err = db.Exec("UPDATE files SET isFavorite = ? WHERE id = ?", isFavorite, fileID)
+	if err != nil {
+		return fmt.Errorf("failed to update favorite status: %w", err)
+	}
+
+	return nil
+}
+
+func copyFile(src, dst string) error {
+	sourceFile, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer sourceFile.Close()
+
+	destFile, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer destFile.Close()
+
+	_, err = io.Copy(destFile, sourceFile)
+	return err
+}
+
+func ExportImagesToAlbum(db *sql.DB, albumName string, imageIDs []int64, galleryDir, albumsBaseDir string) error {
+	if len(imageIDs) == 0 {
+		return fmt.Errorf("no image IDs provided")
+	}
+
+	// Sanitize the album name to prevent directory traversal (e.g., "../../etc")
+	cleanAlbumName := filepath.Base(filepath.Clean(albumName))
+	if cleanAlbumName == "." || cleanAlbumName == "" {
+		return fmt.Errorf("invalid album name")
+	}
+
+	// Create the target album directory
+	targetDir := filepath.Join(albumsBaseDir, cleanAlbumName)
+	if err := os.MkdirAll(targetDir, os.ModePerm); err != nil {
+		return fmt.Errorf("failed to create album directory: %w", err)
+	}
+
+	// Build the IN clause for the query: "SELECT filename FROM files WHERE id IN (?, ?, ?)"
+	placeholders := make([]string, len(imageIDs))
+	args := make([]interface{}, len(imageIDs))
+	for i, id := range imageIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
+	query := fmt.Sprintf("SELECT filename FROM files WHERE id IN (%s)", strings.Join(placeholders, ","))
+
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		return fmt.Errorf("failed to query images for export: %w", err)
+	}
+	defer rows.Close()
+
+	var filenames []string
+	for rows.Next() {
+		var fname string
+		if err := rows.Scan(&fname); err != nil {
+			return fmt.Errorf("failed to scan filename: %w", err)
+		}
+		filenames = append(filenames, fname)
+	}
+
+	if err = rows.Err(); err != nil {
+		return fmt.Errorf("error iterating file rows: %w", err)
+	}
+
+	// Copy the physical files
+	for _, fname := range filenames {
+		srcPath := filepath.Join(galleryDir, fname)
+		dstPath := filepath.Join(targetDir, fname)
+
+		err := copyFile(srcPath, dstPath)
+		if err != nil {
+			fmt.Printf("Warning: failed to copy %s to album %s: %v\n", fname, targetDir, err)
+			continue // skip to the next file rather than aborting the whole export
+		}
+	}
+
+	return nil
 }

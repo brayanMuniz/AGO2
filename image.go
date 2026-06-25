@@ -21,6 +21,7 @@ import (
 type Image struct {
 	ID            int64       `json:"id"`
 	FileName      string      `json:"file_name"`
+	IsFavorite    bool        `json:"is_favorite"`
 	Hash          string      `json:"hash"`
 	MainData      *Post       `json:"main_data"`
 	ThumbnailPath string      `json:"thumbnail_path"`

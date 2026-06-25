@@ -41,9 +41,15 @@ func main() {
 		DB: database,
 	}
 
-	http.HandleFunc("/api/image/{id}", app.handleGetImage)
-	http.HandleFunc("/api/search", app.handleSearch)
-	http.HandleFunc("/api/process-gallery", app.handleProcessGallery)
+	http.HandleFunc("GET /api/image/{id}", app.handleGetImage)
+	http.HandleFunc("GET /api/search", app.handleSearch)
+
+	http.HandleFunc("POST /api/process-gallery", app.handleProcessGallery)
+	http.HandleFunc("POST /api/album/export", app.handleExportAlbum)
+
+	http.HandleFunc("PATCH /api/image/{id}/favorite", app.handleUpdateFavorite)
+
+	http.HandleFunc("DELETE /api/image/{id}", app.handleDeleteImage)
 
 	port := ":8080"
 	fmt.Printf("Server is running on http://localhost%s\n", port)
