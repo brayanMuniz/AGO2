@@ -299,15 +299,21 @@ func saveTags(db *sql.DB, recordID int64, tags []string, category string) {
 func GetImageByID(db *sql.DB, fileID int64, includeMatches bool) (*Image, error) {
 	var img Image
 	var activeMetadataID sql.NullInt64
+	var hasDuplicate sql.NullInt64
 	img.ID = fileID
 
-	err := db.QueryRow("SELECT filename, hash, isFavorite, active_metadata_id, IFNULL(thumbnail_path, '') FROM files WHERE id = ?", fileID).
-		Scan(&img.FileName, &img.Hash, &img.IsFavorite, &activeMetadataID, &img.ThumbnailPath)
+	err := db.QueryRow("SELECT filename, hash, isFavorite, active_metadata_id, IFNULL(thumbnail_path, ''), hasDuplicate FROM files WHERE id = ?", fileID).
+		Scan(&img.FileName, &img.Hash, &img.IsFavorite, &activeMetadataID, &img.ThumbnailPath, &hasDuplicate)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("no file found with ID %d", fileID)
 		}
 		return nil, fmt.Errorf("failed to fetch file data: %w", err)
+	}
+
+	if hasDuplicate.Valid {
+		val := hasDuplicate.Int64
+		img.HasDuplicate = &val
 	}
 
 	var rows *sql.Rows

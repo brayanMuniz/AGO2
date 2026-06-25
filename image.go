@@ -22,6 +22,7 @@ type Image struct {
 	ID            int64       `json:"id"`
 	FileName      string      `json:"file_name"`
 	IsFavorite    bool        `json:"is_favorite"`
+	HasDuplicate  *int64      `json:"has_duplicate,omitempty"`
 	Hash          string      `json:"hash"`
 	MainData      *Post       `json:"main_data"`
 	ThumbnailPath string      `json:"thumbnail_path"`
@@ -70,7 +71,7 @@ func GenerateThumbnail(originalPath, thumbnailDir string) (string, error) {
 	srcW := bounds.Dx()
 	srcH := bounds.Dy()
 
-	maxDim := 1250 // amount of pixels
+	maxDim := 2000 // amount of pixels
 	dstW, dstH := maxDim, maxDim
 	if srcW > srcH {
 		dstH = (srcH * maxDim) / srcW

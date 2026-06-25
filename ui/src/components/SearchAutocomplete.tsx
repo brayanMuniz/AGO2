@@ -2,16 +2,14 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   filterTagSuggestions,
   formatTagToken,
-  getCurrentToken,
-  replaceCurrentToken,
-  toSearchQuery,
+  type TagCategory,
   type TagSuggestion,
 } from '../utils/searchTags';
 
 interface SearchAutocompleteProps {
-  value: string;
-  onChange: (value: string) => void;
-  onSearch: (displayQuery: string) => void;
+  draftInput: string;
+  onDraftChange: (value: string) => void;
+  onAddTag: (category: TagCategory, name: string) => void;
   suggestions: TagSuggestion[];
 }
 
@@ -24,21 +22,20 @@ const CATEGORY_COLORS: Record<string, string> = {
 };
 
 const SearchAutocomplete: React.FC<SearchAutocompleteProps> = ({
-  value,
-  onChange,
-  onSearch,
+  draftInput,
+  onDraftChange,
+  onAddTag,
   suggestions,
 }) => {
   const [open, setOpen] = useState(false);
   const [highlightIndex, setHighlightIndex] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const currentToken = getCurrentToken(value);
-  const filtered = filterTagSuggestions(suggestions, currentToken);
+  const filtered = filterTagSuggestions(suggestions, draftInput.trim());
 
   useEffect(() => {
     setHighlightIndex(0);
-  }, [currentToken, filtered.length]);
+  }, [draftInput, filtered.length]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -52,10 +49,8 @@ const SearchAutocomplete: React.FC<SearchAutocompleteProps> = ({
   }, []);
 
   const applySuggestion = (suggestion: TagSuggestion) => {
-    const token = formatTagToken(suggestion.category, suggestion.name);
-    const nextValue = replaceCurrentToken(value, token);
-    onChange(nextValue);
-    onSearch(nextValue);
+    onAddTag(suggestion.category, suggestion.name);
+    onDraftChange('');
     setOpen(false);
   };
 
@@ -65,7 +60,12 @@ const SearchAutocomplete: React.FC<SearchAutocompleteProps> = ({
       applySuggestion(filtered[highlightIndex]);
       return;
     }
-    onSearch(value);
+
+    const trimmed = draftInput.trim();
+    if (trimmed) {
+      onAddTag('general', trimmed);
+      onDraftChange('');
+    }
     setOpen(false);
   };
 
@@ -88,9 +88,9 @@ const SearchAutocomplete: React.FC<SearchAutocompleteProps> = ({
       <form onSubmit={handleSubmit} className="flex flex-1">
         <input
           type="text"
-          value={value}
+          value={draftInput}
           onChange={(event) => {
-            onChange(event.target.value);
+            onDraftChange(event.target.value);
             setOpen(true);
           }}
           onFocus={() => setOpen(true)}
@@ -110,11 +110,10 @@ const SearchAutocomplete: React.FC<SearchAutocompleteProps> = ({
         </button>
       </form>
 
-      {open && currentToken && filtered.length > 0 && (
+      {open && draftInput.trim() && filtered.length > 0 && (
         <ul className="absolute left-0 right-0 top-full z-20 mt-1 max-h-64 overflow-y-auto rounded-sm border border-[#2a2a35] bg-[#1c1c24] shadow-lg">
           {filtered.map((suggestion, index) => {
             const token = formatTagToken(suggestion.category, suggestion.name);
-            const searchToken = toSearchQuery(token);
             const isActive = index === highlightIndex;
 
             return (
@@ -134,7 +133,7 @@ const SearchAutocomplete: React.FC<SearchAutocompleteProps> = ({
                     </span>
                     <span className="text-gray-200">{suggestion.name}</span>
                   </span>
-                  <span className="ml-3 text-xs text-gray-500">{searchToken}</span>
+                  <span className="ml-3 text-xs text-gray-500">{token}</span>
                 </button>
               </li>
             );

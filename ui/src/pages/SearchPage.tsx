@@ -1,31 +1,27 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
+import { updateFavorite } from '../api/images';
+import DeleteImageButton from '../components/DeleteImageButton';
+import ExportAlbumModal from '../components/ExportAlbumModal';
+import FavoriteStar from '../components/FavoriteStar';
 import SearchAutocomplete from '../components/SearchAutocomplete';
+import SearchFiltersPanel from '../components/SearchFiltersPanel';
+import SearchTagPills from '../components/SearchTagPills';
+import TopBar from '../components/TopBar';
+import type { ImageData } from '../types/image';
 import {
-  appendTagToQuery,
-  toSearchQuery,
+  addTagPill,
+  buildSearchQuery,
+  createTagPill,
+  parseSearchQuery,
+  removeTagPill,
+  type SearchFilters,
+} from '../utils/searchQuery';
+import {
   type TagCategory,
   type TagCategoryKey,
   type TagSuggestion,
 } from '../utils/searchTags';
-
-// --- Types ---
-interface Post {
-  id: number;
-  tags_artist: string[];
-  tags_character: string[];
-  tags_copyright: string[];
-  tags_general: string[];
-  tags_meta: string[];
-}
-
-interface ImageData {
-  id: number;
-  file_name: string;
-  hash: string;
-  main_data: Post | null;
-  thumbnail_path: string;
-}
 
 type TagCount = { name: string; count: number };
 
@@ -50,11 +46,9 @@ function aggregateTags(images: ImageData[], category: TagCategoryKey): TagCount[
   images.forEach((img) => {
     if (!img.main_data) return;
     const tags = img.main_data[category] as string[];
-    if (tags) {
-      tags.forEach((tag) => {
-        counts[tag] = (counts[tag] || 0) + 1;
-      });
-    }
+    tags?.forEach((tag) => {
+      counts[tag] = (counts[tag] || 0) + 1;
+    });
   });
 
   return Object.entries(counts)
@@ -88,20 +82,23 @@ function mergeSuggestions(...lists: TagSuggestion[][]): TagSuggestion[] {
   return Array.from(merged.values());
 }
 
-// --- Main Component ---
 const SearchPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const tagsQuery = searchParams.get('tags') || '';
 
-  const [searchInput, setSearchInput] = useState(tagsQuery);
+  const [filters, setFilters] = useState<SearchFilters>(() => parseSearchQuery(tagsQuery));
+  const [draftInput, setDraftInput] = useState('');
   const [images, setImages] = useState<ImageData[]>([]);
   const [knownTags, setKnownTags] = useState<TagSuggestion[]>([]);
   const [apiSuggestions, setApiSuggestions] = useState<TagSuggestion[]>([]);
-  const [loading, setLoading] = useState<boolean>(false);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [showExportModal, setShowExportModal] = useState(false);
 
   useEffect(() => {
-    setSearchInput(tagsQuery);
+    setFilters(parseSearchQuery(tagsQuery));
   }, [tagsQuery]);
 
   useEffect(() => {
@@ -116,16 +113,13 @@ const SearchPage: React.FC = () => {
 
       try {
         const response = await fetch(`/api/search?tags=${encodeURIComponent(tagsQuery)}`);
-
         if (!response.ok) {
           throw new Error('Failed to search images.');
         }
 
         const data: ImageData[] = await response.json();
         setImages(data || []);
-
-        const resultTags = buildSuggestionsFromImages(data || []);
-        setKnownTags((prev) => mergeSuggestions(prev, resultTags));
+        setKnownTags((prev) => mergeSuggestions(prev, buildSuggestionsFromImages(data || [])));
       } catch (err: any) {
         setError(err.message || 'An unknown error occurred.');
       } finally {
@@ -137,8 +131,7 @@ const SearchPage: React.FC = () => {
   }, [tagsQuery]);
 
   useEffect(() => {
-    const token = searchInput.trim().split(/\s+/).pop() || '';
-    if (!token) {
+    if (!draftInput.trim()) {
       setApiSuggestions([]);
       return;
     }
@@ -146,10 +139,9 @@ const SearchPage: React.FC = () => {
     const timeout = window.setTimeout(async () => {
       try {
         const response = await fetch(
-          `/api/tags/autocomplete?query=${encodeURIComponent(token)}`,
+          `/api/tags/autocomplete?query=${encodeURIComponent(draftInput.trim())}`,
         );
         if (!response.ok) return;
-
         const data: TagSuggestion[] = await response.json();
         setApiSuggestions(data || []);
       } catch {
@@ -158,36 +150,86 @@ const SearchPage: React.FC = () => {
     }, 250);
 
     return () => window.clearTimeout(timeout);
-  }, [searchInput]);
+  }, [draftInput]);
 
   const suggestions = useMemo(
     () => mergeSuggestions(knownTags, apiSuggestions),
     [knownTags, apiSuggestions],
   );
 
-  const runSearch = (displayQuery: string) => {
-    const query = toSearchQuery(displayQuery);
-    if (query) {
-      setSearchParams({ tags: query });
-    } else {
-      setSearchParams({});
+  const debounceRef = useRef<number | null>(null);
+
+  const applyFilters = (nextFilters: SearchFilters, immediate = true) => {
+    setFilters(nextFilters);
+
+    const updateUrl = () => {
+      const query = buildSearchQuery(nextFilters);
+      if (query) {
+        setSearchParams({ tags: query });
+      } else {
+        setSearchParams({});
+      }
+    };
+
+    if (immediate) {
+      if (debounceRef.current) window.clearTimeout(debounceRef.current);
+      updateUrl();
+      return;
+    }
+
+    if (debounceRef.current) window.clearTimeout(debounceRef.current);
+    debounceRef.current = window.setTimeout(updateUrl, 350);
+  };
+
+  const handleAddTag = (category: TagCategory, name: string) => {
+    applyFilters(addTagPill(filters, createTagPill(category, name)));
+  };
+
+  const handleRemoveTag = (pillId: string) => {
+    applyFilters(removeTagPill(filters, pillId));
+  };
+
+  const handleToggleFavorite = async (imageId: number, currentValue: boolean) => {
+    const nextValue = !currentValue;
+    setImages((prev) =>
+      prev.map((img) => (img.id === imageId ? { ...img, is_favorite: nextValue } : img)),
+    );
+
+    try {
+      await updateFavorite(imageId, nextValue);
+    } catch {
+      setImages((prev) =>
+        prev.map((img) => (img.id === imageId ? { ...img, is_favorite: currentValue } : img)),
+      );
     }
   };
 
-  const addTagToQuery = (category: TagCategory, tagName: string) => {
-    const nextInput = appendTagToQuery(searchInput, category, tagName);
-    setSearchInput(nextInput);
-    runSearch(nextInput);
+  const handleImageDeleted = (imageId: number) => {
+    setImages((prev) => prev.filter((img) => img.id !== imageId));
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      next.delete(imageId);
+      return next;
+    });
+  };
+
+  const toggleSelected = (imageId: number) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(imageId)) next.delete(imageId);
+      else next.add(imageId);
+      return next;
+    });
   };
 
   const renderTagList = (tags: TagCount[], category: TagCategory) => {
-    if (!tags || tags.length === 0) return null;
+    if (!tags.length) return null;
 
     return tags.map((tag) => (
       <li key={`${category}:${tag.name}`}>
         <button
           type="button"
-          onClick={() => addTagToQuery(category, tag.name)}
+          onClick={() => handleAddTag(category, tag.name)}
           className="flex w-full items-start text-[13px] hover:underline cursor-pointer text-left"
         >
           <span className={`${CATEGORY_COLORS[category]} font-medium leading-tight flex-1`}>
@@ -204,84 +246,143 @@ const SearchPage: React.FC = () => {
     tags: aggregateTags(images, postKey),
   }));
 
+  const selectedImageIds = Array.from(selectedIds);
+
   return (
-    <div className="min-h-screen bg-[#0e0e12] flex text-gray-300 font-sans">
+    <div className="min-h-screen bg-[#0e0e12] flex flex-col text-gray-300 font-sans">
+      <TopBar />
 
-      {/* LEFT SIDEBAR */}
-      <aside className="w-72 bg-[#1c1c24] border-r border-[#2a2a35] h-screen flex flex-col flex-shrink-0">
-
-        {/* Search Input Area */}
-        <div className="p-4 border-b border-[#2a2a35]">
-          <h2 className="font-bold text-gray-200 mb-2 text-sm">Search</h2>
-          <SearchAutocomplete
-            value={searchInput}
-            onChange={setSearchInput}
-            onSearch={runSearch}
-            suggestions={suggestions}
-          />
-        </div>
-
-        {/* Aggregated Tags Area */}
-        <div className="flex-1 overflow-y-auto p-4 hide-scrollbar">
-          <h2 className="font-bold text-gray-200 mb-2 text-sm">Tags</h2>
-          {images.length === 0 && !loading && (
-            <p className="text-sm text-gray-500">No tags to display.</p>
-          )}
-          <ul className="space-y-0.5">
-            {sidebarTags.map(({ category, tags }) => renderTagList(tags, category))}
-          </ul>
-        </div>
-      </aside>
-
-      {/* MAIN CONTENT AREA */}
-      <main className="flex-1 h-screen flex flex-col overflow-hidden">
-
-        {/* Top Navbar area (Posts / Artist) */}
-        <header className="h-10 border-b border-[#2a2a35] flex items-center px-4 shrink-0 gap-4 text-sm font-semibold">
-          <span className="text-[#60a5fa] cursor-pointer">Posts</span>
-          <span className="text-gray-400 hover:text-gray-200 cursor-pointer">Artist</span>
-          <div className="ml-auto text-gray-400 text-xs">
-            {images.length} result(s)
+      <div className="flex flex-1 overflow-hidden">
+        <aside className="w-72 bg-[#1c1c24] border-r border-[#2a2a35] flex flex-col flex-shrink-0">
+          <div className="p-4 border-b border-[#2a2a35]">
+            <h2 className="font-bold text-gray-200 mb-2 text-sm">Search</h2>
+            <SearchAutocomplete
+              draftInput={draftInput}
+              onDraftChange={setDraftInput}
+              onAddTag={handleAddTag}
+              suggestions={suggestions}
+            />
+            <SearchTagPills tags={filters.tags} onRemove={handleRemoveTag} />
+            <SearchFiltersPanel
+              filters={filters}
+              onChange={(next) => applyFilters(next, true)}
+              onSliderChange={(next) => applyFilters(next, false)}
+            />
           </div>
-        </header>
 
-        {/* Gallery Grid */}
-        <div className="flex-1 overflow-y-auto p-4 hide-scrollbar">
-          {loading ? (
-            <div className="flex justify-center items-center h-full text-gray-400">Searching...</div>
-          ) : error ? (
-            <div className="flex justify-center items-center h-full text-red-400">{error}</div>
-          ) : images.length === 0 ? (
-            <div className="flex justify-center items-center h-full text-gray-500">
-              {tagsQuery ? 'No images found for these tags.' : 'Enter tags to search.'}
-            </div>
-          ) : (
-            <div className="flex flex-wrap gap-4 content-start">
-              {images.map((img) => (
-                <Link
-                  to={`/image/${img.id}`}
-                  key={img.id}
-                  className="block relative group"
+          <div className="flex-1 overflow-y-auto p-4 hide-scrollbar">
+            <h2 className="font-bold text-gray-200 mb-2 text-sm">Tags</h2>
+            {images.length === 0 && !loading && (
+              <p className="text-sm text-gray-500">No tags to display.</p>
+            )}
+            <ul className="space-y-0.5">
+              {sidebarTags.map(({ category, tags }) => renderTagList(tags, category))}
+            </ul>
+          </div>
+        </aside>
+
+        <main className="flex-1 flex flex-col overflow-hidden">
+          <div className="h-10 border-b border-[#2a2a35] flex items-center px-4 shrink-0 gap-3 text-xs">
+            <span className="text-gray-400">{images.length} result(s)</span>
+            <div className="ml-auto flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectionMode((prev) => !prev);
+                  setSelectedIds(new Set());
+                }}
+                className={`px-2.5 py-1 rounded border transition-colors ${
+                  selectionMode
+                    ? 'border-[#60a5fa] text-[#93c5fd] bg-[#60a5fa]/10'
+                    : 'border-[#2a2a35] text-gray-400 hover:text-gray-200'
+                }`}
+              >
+                Select
+              </button>
+              {selectionMode && selectedImageIds.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setShowExportModal(true)}
+                  className="px-2.5 py-1 rounded border border-[#2a2a35] text-gray-300 hover:text-white hover:border-[#60a5fa]"
                 >
-                  <div className="border border-transparent group-hover:border-[#60a5fa] transition-colors bg-[#111115] p-1">
-                    <img
-                      src={img.thumbnail_path ? `${img.thumbnail_path}` : `/images/${img.file_name}`}
-                      alt={`Post ${img.id}`}
-                      className="object-contain"
-                      style={{
-                        maxWidth: '250px',
-                        maxHeight: '250px',
-                      }}
-                      loading="lazy"
-                    />
-                  </div>
-                </Link>
-              ))}
+                  Export ({selectedImageIds.length})
+                </button>
+              )}
             </div>
-          )}
-        </div>
-      </main>
+          </div>
 
+          <div className="flex-1 overflow-y-auto p-4 hide-scrollbar">
+            {loading ? (
+              <div className="flex justify-center items-center h-full text-gray-400">Searching...</div>
+            ) : error ? (
+              <div className="flex justify-center items-center h-full text-red-400">{error}</div>
+            ) : images.length === 0 ? (
+              <div className="flex justify-center items-center h-full text-gray-500">
+                {tagsQuery ? 'No images found for these tags.' : 'Add tags or filters to search.'}
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-4 content-start">
+                {images.map((img) => (
+                  <div key={img.id} className="relative group">
+                    {selectionMode && (
+                      <label className="absolute top-2 left-2 z-10">
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.has(img.id)}
+                          onChange={() => toggleSelected(img.id)}
+                          className="accent-[#60a5fa]"
+                        />
+                      </label>
+                    )}
+
+                    <Link
+                      to={selectionMode ? '#' : `/image/${img.id}`}
+                      onClick={(event) => {
+                        if (selectionMode) event.preventDefault();
+                      }}
+                      className="block relative"
+                    >
+                      <div className="border border-transparent group-hover:border-[#60a5fa] transition-colors bg-[#111115] p-1">
+                        <img
+                          src={img.thumbnail_path ? img.thumbnail_path : `/images/${img.file_name}`}
+                          alt={`Post ${img.id}`}
+                          className="object-contain"
+                          style={{ maxWidth: '250px', maxHeight: '250px' }}
+                          loading="lazy"
+                        />
+                      </div>
+
+                      <div className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <FavoriteStar
+                          isFavorite={img.is_favorite ?? false}
+                          onToggle={() => handleToggleFavorite(img.id, img.is_favorite ?? false)}
+                          size="sm"
+                          className="bg-black/60"
+                        />
+                        <span className="bg-black/60 rounded-full">
+                          <DeleteImageButton
+                            imageId={img.id}
+                            variant="icon"
+                            onDeleted={() => handleImageDeleted(img.id)}
+                            className="bg-transparent"
+                          />
+                        </span>
+                      </div>
+                    </Link>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </main>
+      </div>
+
+      {showExportModal && (
+        <ExportAlbumModal
+          imageIds={selectedImageIds}
+          onClose={() => setShowExportModal(false)}
+        />
+      )}
     </div>
   );
 };
