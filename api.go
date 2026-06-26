@@ -1,7 +1,9 @@
 package main
 
 import (
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -9,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -16,6 +19,33 @@ import (
 
 type App struct {
 	DB *sql.DB
+}
+
+type ProcessGallerySum struct {
+	Processed int `json:"processed"`
+	AutoMatch int `json:"auto_match"`
+	Skipped   int `json:"skipped"`
+}
+
+type JobState struct {
+	sync.RWMutex
+	ID         string            `json:"job_id"`
+	Status     string            `json:"status"` // "processing", "completed", "failed"
+	Stats      ProcessGallerySum `json:"stats"`
+	TotalFiles int               `json:"total_files"`
+	Error      string            `json:"error,omitempty"`
+}
+
+// WARNING: I am not currently cleaning up this job
+var (
+	jobStoreMu sync.RWMutex
+	jobStore   = make(map[string]*JobState)
+)
+
+func generateJobID() string {
+	b := make([]byte, 8)
+	rand.Read(b)
+	return hex.EncodeToString(b)
 }
 
 // Helper to send JSON formatted error messages
@@ -101,36 +131,78 @@ func (a *App) handleProcessGallery(w http.ResponseWriter, r *http.Request) {
 
 	apiKey := os.Getenv("DANBOORU_KEY")
 	userName := os.Getenv("USERNAME")
-
-	if apiKey == "" || userName == "" {
-		fmt.Println("Error: API credentials missing from environment variables.")
-		sendJSONError(w, "Server configuration error", http.StatusInternalServerError)
-		return
-	}
-
 	targetDir := "./Gallery/"
 
-	err := ProcessGalleryDirectory(a.DB, apiKey, userName, targetDir)
-	if err != nil {
-		fmt.Printf("Error processing gallery: %v\n", err)
-		sendJSONError(w, "Failed to process gallery", http.StatusInternalServerError)
+	job := &JobState{
+		ID:     generateJobID(),
+		Status: "processing",
+		Stats:  ProcessGallerySum{Processed: 0, AutoMatch: 0, Skipped: 0},
+	}
+
+	// save job
+	jobStoreMu.Lock()
+	jobStore[job.ID] = job
+	jobStoreMu.Unlock()
+
+	go runGalleryWorker(a.DB, apiKey, userName, targetDir, job)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted) // 202 Accepted is standard for "started processing"
+	json.NewEncoder(w).Encode(map[string]string{
+		"job_id":  job.ID,
+		"message": "Processing started in the background",
+	})
+}
+
+// GET /api/process-gallery/status?job_id=xyz
+func (a *App) handleGetJobStatus(w http.ResponseWriter, r *http.Request) {
+	jobID := r.URL.Query().Get("job_id")
+	if jobID == "" {
+		sendJSONError(w, "job_id is required", http.StatusBadRequest)
 		return
 	}
 
+	jobStoreMu.RLock()
+	job, exists := jobStore[jobID]
+	jobStoreMu.RUnlock()
+
+	if !exists {
+		sendJSONError(w, "Job not found", http.StatusNotFound)
+		return
+	}
+
+	job.RLock()
+	defer job.RUnlock()
+
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{
-		"message": "Successfully processed Gallery Directory",
-	})
-	fmt.Println("Finished processing POST /api/process-gallery")
+	json.NewEncoder(w).Encode(job)
 }
 
-// OPTIMIZE: Add Go routines
-func ProcessGalleryDirectory(db *sql.DB, apikey, userName, dirPath string) error {
+func runGalleryWorker(db *sql.DB, apikey, userName, dirPath string, job *JobState) {
 	entries, err := os.ReadDir(dirPath)
 	if err != nil {
-		return err
+		job.Lock()
+		job.Status = "failed"
+		job.Error = err.Error()
+		job.Unlock()
+		return
 	}
+
+	// Only count images in ./Gallery
+	validEntries := 0
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		ext := strings.ToLower(filepath.Ext(entry.Name()))
+		if ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".webp" {
+			validEntries++
+		}
+	}
+
+	job.Lock()
+	job.TotalFiles = validEntries
+	job.Unlock()
 
 	for _, entry := range entries {
 		if entry.IsDir() {
@@ -145,15 +217,32 @@ func ProcessGalleryDirectory(db *sql.DB, apikey, userName, dirPath string) error
 
 		filePath := filepath.Join(dirPath, fileName)
 
-		err := ProcessNewImageUpload(db, apikey, userName, fileName, filePath)
+		r, err := ProcessNewImageUpload(db, apikey, userName, fileName, filePath)
 		if err != nil {
-			return err
+			fmt.Printf("Error processing %s: %v\n", fileName, err)
+			continue
 		}
 
-		time.Sleep(1 * time.Second) // for rate limits
+		job.Lock()
+		if r.Skipped {
+			job.Stats.Skipped++
+		} else {
+			job.Stats.Processed++
+			if r.AutoMatch {
+				job.Stats.AutoMatch++
+			}
+		}
+		job.Unlock()
+
+		// If not skipped and made apiCall, rate limit
+		if !r.Skipped {
+			time.Sleep(1 * time.Second)
+		}
 	}
 
-	return nil
+	job.Lock()
+	job.Status = "completed"
+	job.Unlock()
 }
 
 // DELETE /api/image/{id}

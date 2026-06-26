@@ -43,6 +43,7 @@ func main() {
 
 	http.HandleFunc("GET /api/image/{id}", app.handleGetImage)
 	http.HandleFunc("GET /api/search", app.handleSearch)
+	http.HandleFunc("GET /api/process-gallery/status", app.handleGetJobStatus)
 
 	http.HandleFunc("POST /api/process-gallery", app.handleProcessGallery)
 	http.HandleFunc("POST /api/album/export", app.handleExportAlbum)

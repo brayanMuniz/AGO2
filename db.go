@@ -98,32 +98,48 @@ func createTables(db *sql.DB) error {
 	return err
 }
 
+type ProcessedImage struct {
+	AutoMatch bool
+	Skipped   bool
+}
+
 // OPTIMIZE: If in the future this is too slow use a transaction instead
-func ProcessNewImageUpload(db *sql.DB, apiKey, userName, filename, filePath string) error {
+func ProcessNewImageUpload(db *sql.DB, apiKey, userName, filename, filePath string) (ProcessedImage, error) {
+	result := ProcessedImage{AutoMatch: false, Skipped: false}
+
 	hash, err := GetPixelHash(filePath)
 	if err != nil {
-		return fmt.Errorf("failed to hash image: %w", err)
+		return result, fmt.Errorf("failed to hash image: %w", err)
 	}
 
 	// Checks for an existing original file
 	var existingID int64
 	var existingFilename string
 	err = db.QueryRow("SELECT id, filename FROM files WHERE hash = ? AND hasDuplicate IS NULL", hash).Scan(&existingID, &existingFilename)
-	if err == nil {
-		fmt.Printf("Duplicate: %s already saved as %s\n", filename, existingFilename)
 
-		// Log the duplicate in the database pointing to the original ID
+	if err == nil {
+		// Same hash AND same filename. Skip entirely.
+		if filename == existingFilename {
+			fmt.Printf("Skipped: %s is already processed.\n", filename)
+			result.Skipped = true
+			return result, nil
+		}
+
+		// Same hash BUT different filename. Log as duplicate.
+		fmt.Printf("Duplicate: %s is a copy of %s\n", filename, existingFilename)
 		_, err = db.Exec("INSERT INTO files (filename, hash, hasDuplicate, isFavorite) VALUES (?, ?, ?, FALSE)", filename, hash, existingID)
 		if err != nil {
-			return fmt.Errorf("failed to insert duplicate file record: %w", err)
+			return result, fmt.Errorf("failed to insert duplicate file record: %w", err)
 		}
-		return nil
+
+		result.Skipped = true
+		return result, nil
 	}
 
 	// Insert new original file
 	_, err = db.Exec("INSERT INTO files (filename, hash, isFavorite) VALUES (?, ?, FALSE)", filename, hash)
 	if err != nil {
-		return fmt.Errorf("failed to insert file record: %w", err)
+		return result, fmt.Errorf("failed to insert file record: %w", err)
 	}
 	fmt.Printf("Saved new file record: %s\n", filename)
 
@@ -139,7 +155,7 @@ func ProcessNewImageUpload(db *sql.DB, apiKey, userName, filename, filePath stri
 
 	matches, err := iqdb_upload_request(apiKey, userName, filePath)
 	if err != nil {
-		return fmt.Errorf("iqdb api failed: %w", err)
+		return result, fmt.Errorf("iqdb api failed: %w", err)
 	}
 
 	var bestRecordID int64
@@ -150,7 +166,7 @@ func ProcessNewImageUpload(db *sql.DB, apiKey, userName, filename, filePath stri
 			(filename, provider_name, provider_id, score, file_url, large_file_url, rating, source, image_height, image_width, file_size)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`
-		result, err := db.Exec(query,
+		execRes, err := db.Exec(query,
 			filename,
 			"danbooru",
 			fmt.Sprintf("%d", match.Post.ID),
@@ -168,7 +184,7 @@ func ProcessNewImageUpload(db *sql.DB, apiKey, userName, filename, filePath stri
 			continue
 		}
 
-		recordID, _ := result.LastInsertId()
+		recordID, _ := execRes.LastInsertId()
 
 		saveTags(db, recordID, match.Post.TagsArtist, "artist")
 		saveTags(db, recordID, match.Post.TagsCharacters, "character")
@@ -186,14 +202,14 @@ func ProcessNewImageUpload(db *sql.DB, apiKey, userName, filename, filePath stri
 	if highestScore >= 95.0 && bestRecordID > 0 {
 		_, err = db.Exec("UPDATE files SET active_metadata_id = ? WHERE filename = ?", bestRecordID, filename)
 		if err != nil {
-			return fmt.Errorf("failed to lock in active metadata: %w", err)
+			return result, fmt.Errorf("failed to lock in active metadata: %w", err)
 		}
-		fmt.Printf("Auto-verified match locked in! (Score: %.2f)\n", highestScore)
+		result.AutoMatch = true
 	} else {
 		fmt.Printf("No 95%%+ match found. Saved %d potential matches to the verification queue.\n", len(matches))
 	}
 
-	return nil
+	return result, nil
 }
 
 func GetApprovedMetadata(db *sql.DB, filename string) (*Post, error) {
