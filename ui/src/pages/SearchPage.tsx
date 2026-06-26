@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { updateFavorite } from '../api/images';
-import DeleteImageButton from '../components/DeleteImageButton';
 import ExportAlbumModal from '../components/ExportAlbumModal';
 import FavoriteStar from '../components/FavoriteStar';
 import SearchAutocomplete from '../components/SearchAutocomplete';
@@ -204,14 +203,6 @@ const SearchPage: React.FC = () => {
     }
   };
 
-  const handleImageDeleted = (imageId: number) => {
-    setImages((prev) => prev.filter((img) => img.id !== imageId));
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      next.delete(imageId);
-      return next;
-    });
-  };
 
   const toggleSelected = (imageId: number) => {
     setSelectedIds((prev) => {
@@ -247,6 +238,7 @@ const SearchPage: React.FC = () => {
   }));
 
   const selectedImageIds = Array.from(selectedIds);
+  const allImagesSelected = images.length > 0 && selectedIds.size === images.length;
 
   return (
     <div className="min-h-screen bg-[#0e0e12] flex flex-col text-gray-300 font-sans">
@@ -285,20 +277,36 @@ const SearchPage: React.FC = () => {
           <div className="h-10 border-b border-[#2a2a35] flex items-center px-4 shrink-0 gap-3 text-xs">
             <span className="text-gray-400">{images.length} result(s)</span>
             <div className="ml-auto flex items-center gap-2">
+              {selectionMode && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (allImagesSelected) {
+                      setSelectedIds(new Set());
+                    } else {
+                      setSelectedIds(new Set(images.map((img) => img.id)));
+                    }
+                  }}
+                  className="px-2.5 py-1 rounded border border-[#2a2a35] text-gray-400 hover:text-gray-200 transition-colors"
+                >
+                  {allImagesSelected ? 'Deselect All' : 'Select All'}
+                </button>
+              )}
+
               <button
                 type="button"
                 onClick={() => {
                   setSelectionMode((prev) => !prev);
                   setSelectedIds(new Set());
                 }}
-                className={`px-2.5 py-1 rounded border transition-colors ${
-                  selectionMode
-                    ? 'border-[#60a5fa] text-[#93c5fd] bg-[#60a5fa]/10'
-                    : 'border-[#2a2a35] text-gray-400 hover:text-gray-200'
-                }`}
+                className={`px-2.5 py-1 rounded border transition-colors ${selectionMode
+                  ? 'border-[#60a5fa] text-[#93c5fd] bg-[#60a5fa]/10'
+                  : 'border-[#2a2a35] text-gray-400 hover:text-gray-200'
+                  }`}
               >
                 Select
               </button>
+
               {selectionMode && selectedImageIds.length > 0 && (
                 <button
                   type="button"
@@ -359,14 +367,6 @@ const SearchPage: React.FC = () => {
                           size="sm"
                           className="bg-black/60"
                         />
-                        <span className="bg-black/60 rounded-full">
-                          <DeleteImageButton
-                            imageId={img.id}
-                            variant="icon"
-                            onDeleted={() => handleImageDeleted(img.id)}
-                            className="bg-transparent"
-                          />
-                        </span>
                       </div>
                     </Link>
                   </div>
