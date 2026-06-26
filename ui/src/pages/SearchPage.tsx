@@ -190,19 +190,55 @@ const SearchPage: React.FC = () => {
 
   const handleToggleFavorite = async (imageId: number, currentValue: boolean) => {
     const nextValue = !currentValue;
-    setImages((prev) =>
-      prev.map((img) => (img.id === imageId ? { ...img, is_favorite: nextValue } : img)),
-    );
+    const imageToUpdate = images.find((img) => img.id === imageId);
+
+    // Evaluate if the active search specifically filters for or against favorites.
+    // We check `filters` object (if you store it there) and fallback to parsing the raw query string.
+    const isFilteringFavorites =
+      (filters as any).favorite === true ||
+      /(?:^|\s)favorite:true/.test(tagsQuery) ||
+      /(?:^|\s)favorite(?:\s|$)/.test(tagsQuery);
+
+    const isFilteringNotFavorites =
+      (filters as any).favorite === false ||
+      /(?:^|\s)-favorite/.test(tagsQuery) ||
+      /(?:^|\s)favorite:false/.test(tagsQuery);
+
+    const shouldRemove =
+      (nextValue === true && isFilteringNotFavorites) ||
+      (nextValue === false && isFilteringFavorites);
+
+    // Optimistic Update
+    setImages((prev) => {
+      if (shouldRemove) {
+        return prev.filter((img) => img.id !== imageId);
+      }
+      return prev.map((img) => (img.id === imageId ? { ...img, is_favorite: nextValue } : img));
+    });
+
+    if (shouldRemove) {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        next.delete(imageId);
+        return next;
+      });
+    }
 
     try {
       await updateFavorite(imageId, nextValue);
     } catch {
-      setImages((prev) =>
-        prev.map((img) => (img.id === imageId ? { ...img, is_favorite: currentValue } : img)),
-      );
+      // Revert Optimistic Update on failure
+      setImages((prev) => {
+        if (shouldRemove && imageToUpdate) {
+          // If the API fails, put the image back into the view
+          return [...prev, imageToUpdate].sort((a, b) => b.id - a.id);
+        }
+        return prev.map((img) =>
+          img.id === imageId ? { ...img, is_favorite: currentValue } : img
+        );
+      });
     }
   };
-
 
   const toggleSelected = (imageId: number) => {
     setSelectedIds((prev) => {

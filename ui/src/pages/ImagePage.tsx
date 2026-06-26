@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, Link } from 'react-router-dom';
 import { updateFavorite } from '../api/images';
 import DeleteImageButton from '../components/DeleteImageButton';
 import DuplicateImageNotice from '../components/DuplicateImageNotice';
@@ -24,7 +24,12 @@ const TagCategory = ({
       <ul className="space-y-0.5">
         {tags.map((tag) => (
           <li key={tag} className="text-[13px] hover:underline cursor-pointer">
-            <span className={`${colorClass} font-medium leading-tight`}>{tag}</span>
+            <Link
+              to={`/?tags=${encodeURIComponent(tag)}`}
+              className={`${colorClass} font-medium leading-tight block`}
+            >
+              {tag}
+            </Link>
           </li>
         ))}
       </ul>
@@ -177,12 +182,12 @@ const ImagePage: React.FC = () => {
           </div>
         </aside>
 
-        <main className="flex-1 flex items-center justify-center p-8 overflow-hidden">
-          <div className="relative max-w-full max-h-full flex items-center justify-center border-2 border-gray-600 rounded-[2rem] p-4">
+        <main className="flex-1 flex items-center justify-center p-4 overflow-hidden min-h-0">
+          <div className="relative w-full h-full flex items-center justify-center border-2 border-gray-600 rounded-[2rem] p-2">
             <img
               src={`/images/${imageData.file_name}`}
               alt={`Post ${post.id}`}
-              className="max-w-full max-h-[85vh] object-contain rounded-xl"
+              className="max-w-full max-h-full object-contain rounded-xl"
               onError={(event) => {
                 event.currentTarget.style.display = 'none';
                 event.currentTarget.parentElement?.classList.add(
