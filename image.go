@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"image"
 	"image/draw"
 	_ "image/gif"
@@ -10,6 +11,7 @@ import (
 	_ "image/png"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	_ "golang.org/x/image/bmp"
@@ -17,6 +19,13 @@ import (
 	_ "golang.org/x/image/tiff"
 	_ "golang.org/x/image/webp"
 )
+
+type Color struct {
+	R   int    `json:"r"`
+	G   int    `json:"g"`
+	B   int    `json:"b"`
+	Hex string `json:"hex"`
+}
 
 type Image struct {
 	ID            int64       `json:"id"`
@@ -110,4 +119,75 @@ func GenerateThumbnail(originalPath, thumbnailDir string) (string, error) {
 	}
 
 	return outPath, nil
+}
+
+// Extracts the top N dominant colors from an image and returns them as Color structs
+func ExtractColorPalette(filePath string, numColors int) ([]Color, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	srcImg, _, err := image.Decode(file)
+	if err != nil {
+		return nil, err
+	}
+
+	dstImg := image.NewRGBA(image.Rect(0, 0, 50, 50))
+	xdraw.BiLinear.Scale(dstImg, dstImg.Bounds(), srcImg, srcImg.Bounds(), xdraw.Over, nil)
+
+	// Tally colors into quantized buckets (reduces noise/slight variations)
+	colorCounts := make(map[string]int)
+	bounds := dstImg.Bounds()
+
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			r, g, b, a := dstImg.At(x, y).RGBA()
+
+			// Ignore transparent pixels
+			if a == 0 {
+				continue
+			}
+
+			// Downscale 16-bit to 8-bit, then mask the lower bits to group similar colors
+			r8 := (r >> 8) & 0xF0
+			g8 := (g >> 8) & 0xF0
+			b8 := (b >> 8) & 0xF0
+
+			hexStr := fmt.Sprintf("#%02x%02x%02x", r8, g8, b8)
+			colorCounts[hexStr]++
+		}
+	}
+
+	// Sort the buckets by frequency
+	type colorFreq struct {
+		Hex   string
+		Count int
+	}
+	var frequencies []colorFreq
+	for hexStr, count := range colorCounts {
+		frequencies = append(frequencies, colorFreq{Hex: hexStr, Count: count})
+	}
+
+	sort.Slice(frequencies, func(i, j int) bool {
+		return frequencies[i].Count > frequencies[j].Count
+	})
+
+	// Extract top N as Color structs
+	var palette []Color
+	for i := 0; i < len(frequencies) && i < numColors; i++ {
+		var r, g, b int
+		// Parse the hex string back into RGB integers
+		fmt.Sscanf(frequencies[i].Hex, "#%02x%02x%02x", &r, &g, &b)
+
+		palette = append(palette, Color{
+			R:   r,
+			G:   g,
+			B:   b,
+			Hex: frequencies[i].Hex,
+		})
+	}
+
+	return palette, nil
 }

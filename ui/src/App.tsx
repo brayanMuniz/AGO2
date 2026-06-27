@@ -4,7 +4,6 @@ import SearchPage from './pages/SearchPage';
 import ImagePage from './pages/ImagePage';
 import SettingsLayout from './layouts/SettingsLayout';
 import GeneralSettings from './pages/GeneralSettings';
-import SyncPage from './pages/SyncPage';
 import MatchPage from './pages/MatchPage';
 import DuplicatesPage from './pages/DuplicatesPage';
 
@@ -17,7 +16,6 @@ function App() {
       {/* Settings Layout with Nested Routes */}
       <Route path="/settings" element={<SettingsLayout />}>
         <Route index element={<GeneralSettings />} />
-        <Route path="sync" element={<SyncPage />} />
         <Route path="match" element={<MatchPage />} />
         <Route path="duplicates" element={<DuplicatesPage />} />
       </Route>

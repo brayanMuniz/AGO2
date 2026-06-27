@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 
@@ -11,7 +12,7 @@ import (
 func main() {
 	database, err := InitDB("./gallery.db")
 	if err != nil {
-		fmt.Printf("", err)
+		log.Fatalf("Failed to initialize database: %v", err)
 	}
 	defer database.Close()
 
@@ -21,19 +22,18 @@ func main() {
 
 	err = godotenv.Load("./.env")
 	if err != nil {
-		fmt.Println("Could not read the .env file")
-		return
+		log.Fatalf("Could not read the .env file", err)
 	}
 
 	userName := os.Getenv("USERNAME")
 	if userName == "" {
-		fmt.Println("userName is empty")
+		fmt.Println("DANBOORU userName is empty")
 		return
 	}
 
 	apiKey := os.Getenv("DANBOORU_KEY")
 	if apiKey == "" {
-		fmt.Println("api key is empty")
+		fmt.Println("DANBOORU api key is empty")
 		return
 	}
 
@@ -42,6 +42,7 @@ func main() {
 	}
 
 	http.HandleFunc("GET /api/image/{id}", app.handleGetImage)
+	http.HandleFunc("GET /api/images/unmatched", app.handleGetUnmatchedImages)
 	http.HandleFunc("GET /api/search", app.handleSearch)
 	http.HandleFunc("GET /api/process-gallery/status", app.handleGetJobStatus)
 
@@ -57,7 +58,6 @@ func main() {
 
 	err = http.ListenAndServe(port, nil)
 	if err != nil {
-		fmt.Println("Server failed to start: %v\n", err)
-		return
+		log.Fatalf("Server failed to start: %v\n", err)
 	}
 }

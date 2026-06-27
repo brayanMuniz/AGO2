@@ -92,8 +92,20 @@ func createTables(db *sql.DB) error {
 		FOREIGN KEY (metadata_id) REFERENCES metadata_records (id) ON DELETE CASCADE,
 		FOREIGN KEY (tag_id) REFERENCES tags (id) ON DELETE CASCADE
 	);
-	`
 
+	CREATE TABLE IF NOT EXISTS image_colors (
+	    id INTEGER PRIMARY KEY AUTOINCREMENT,
+	    file_id INTEGER NOT NULL,
+	    r INTEGER NOT NULL,
+	    g INTEGER NOT NULL,
+	    b INTEGER NOT NULL,
+	    hex TEXT NOT NULL,
+	    FOREIGN KEY (file_id) REFERENCES files (id) ON DELETE CASCADE
+	);
+
+	-- Index for faster lookups when we do math on these columns
+	CREATE INDEX IF NOT EXISTS idx_image_colors_rgb ON image_colors(r, g, b);
+	`
 	_, err := db.Exec(schema)
 	return err
 }
@@ -110,6 +122,12 @@ func ProcessNewImageUpload(db *sql.DB, apiKey, userName, filename, filePath stri
 	hash, err := GetPixelHash(filePath)
 	if err != nil {
 		return result, fmt.Errorf("failed to hash image: %w", err)
+	}
+
+	palette, err := ExtractColorPalette(filePath, 5) // Get top 5 colors
+	if err != nil {
+		fmt.Printf("Warning: failed to extract color palette for %s: %v\n", filename, err)
+		palette = []Color{} // Default to empty array on failure
 	}
 
 	// Checks for an existing original file
@@ -137,11 +155,23 @@ func ProcessNewImageUpload(db *sql.DB, apiKey, userName, filename, filePath stri
 	}
 
 	// Insert new original file
-	_, err = db.Exec("INSERT INTO files (filename, hash, isFavorite) VALUES (?, ?, FALSE)", filename, hash)
+	execRes, err := db.Exec("INSERT INTO files (filename, hash, isFavorite) VALUES (?, ?, FALSE)", filename, hash)
 	if err != nil {
 		return result, fmt.Errorf("failed to insert file record: %w", err)
 	}
+	newFileID, _ := execRes.LastInsertId()
 	fmt.Printf("Saved new file record: %s\n", filename)
+
+	// Save the extracted colors to the linked table
+	for _, color := range palette {
+		_, err = db.Exec(
+			"INSERT INTO image_colors (file_id, r, g, b, hex) VALUES (?, ?, ?, ?, ?)",
+			newFileID, color.R, color.G, color.B, color.Hex,
+		)
+		if err != nil {
+			fmt.Printf("Warning: failed to insert color for %s: %v\n", filename, err)
+		}
+	}
 
 	thumbPath, thumbErr := GenerateThumbnail(filePath, "thumbnails")
 	if thumbErr != nil {
@@ -161,12 +191,18 @@ func ProcessNewImageUpload(db *sql.DB, apiKey, userName, filename, filePath stri
 	var bestRecordID int64
 	var highestScore float64
 	for _, match := range matches {
+
+		// Do not add useless data
+		if match.Score < 69.0 {
+			continue
+		}
+
 		query := `
 			INSERT INTO metadata_records 
 			(filename, provider_name, provider_id, score, file_url, large_file_url, rating, source, image_height, image_width, file_size)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`
-		execRes, err := db.Exec(query,
+		execResMatch, err := db.Exec(query,
 			filename,
 			"danbooru",
 			fmt.Sprintf("%d", match.Post.ID),
@@ -184,7 +220,7 @@ func ProcessNewImageUpload(db *sql.DB, apiKey, userName, filename, filePath stri
 			continue
 		}
 
-		recordID, _ := execRes.LastInsertId()
+		recordID, _ := execResMatch.LastInsertId()
 
 		saveTags(db, recordID, match.Post.TagsArtist, "artist")
 		saveTags(db, recordID, match.Post.TagsCharacters, "character")
@@ -470,19 +506,18 @@ func SearchImagesByTags(db *sql.DB, searchTokens []string) ([]Image, error) {
 
 	var normalTags []string
 	var ratings []string
-	var isFavoriteFilter *bool // Pointer to differentiate between not-provided and false
+	var isFavoriteFilter *bool
+	var orderByColor string
 
 	// Base query joining files to metadata_records
-	query := "SELECT f.id FROM files f JOIN metadata_records m ON f.active_metadata_id = m.id"
+	query := "SELECT f.id FROM files f LEFT JOIN metadata_records m ON f.active_metadata_id = m.id"
 	var whereClauses []string
 	var args []interface{}
 
-	// Inline helper to parse numeric prefixes (width, height, size) with operators (>, <, >=, <=)
 	parseNumericToken := func(column, token, prefix string) error {
 		valStr := strings.TrimPrefix(token, prefix)
 		op := "="
 
-		// Detect and extract mathematical operators
 		if strings.HasPrefix(valStr, ">=") {
 			op = ">="
 			valStr = valStr[2:]
@@ -497,7 +532,6 @@ func SearchImagesByTags(db *sql.DB, searchTokens []string) ([]Image, error) {
 			valStr = valStr[1:]
 		}
 
-		// Convert to integer to prevent SQL injection and ensure valid data
 		val, err := strconv.Atoi(valStr)
 		if err != nil {
 			return fmt.Errorf("invalid numeric value in search token: '%s'", token)
@@ -533,6 +567,34 @@ func SearchImagesByTags(db *sql.DB, searchTokens []string) ([]Image, error) {
 				return nil, fmt.Errorf("invalid boolean value in search token: '%s'", token)
 			}
 			isFavoriteFilter = &favVal
+
+		} else if strings.HasPrefix(lowerToken, "brightness:") {
+			valStr := strings.TrimPrefix(lowerToken, "brightness:")
+			parts := strings.Split(valStr, "-")
+			if len(parts) == 2 {
+				minB, err1 := strconv.ParseFloat(parts[0], 64)
+				maxB, err2 := strconv.ParseFloat(parts[1], 64)
+				if err1 == nil && err2 == nil {
+					// Use a subquery to calculate the average brightness of the image's palette
+					whereClauses = append(whereClauses, `
+						(SELECT AVG((0.299 * r) + (0.587 * g) + (0.114 * b)) 
+						 FROM image_colors WHERE file_id = f.id) BETWEEN ? AND ?
+					`)
+					args = append(args, minB, maxB)
+				}
+			}
+
+		} else if strings.HasPrefix(lowerToken, "color:#") {
+			hexStr := strings.TrimPrefix(lowerToken, "color:")
+			var r, g, b int
+			fmt.Sscanf(hexStr, "#%02x%02x%02x", &r, &g, &b)
+
+			// SORT by the closest color distance using a subquery
+			orderByColor = fmt.Sprintf(`
+				(SELECT MIN((r - %d)*(r - %d) + (g - %d)*(g - %d) + (b - %d)*(b - %d)) 
+				 FROM image_colors WHERE file_id = f.id) ASC
+			`, r, r, g, g, b, b)
+
 		} else {
 			normalTags = append(normalTags, strings.TrimSpace(token))
 		}
@@ -545,7 +607,6 @@ func SearchImagesByTags(db *sql.DB, searchTokens []string) ([]Image, error) {
 			placeholders[i] = "?"
 			args = append(args, r)
 		}
-		// Uses IN () so multiple ratings act as an OR (e.g., rating:g OR rating:s)
 		whereClauses = append(whereClauses, fmt.Sprintf("LOWER(m.rating) IN (%s)", strings.Join(placeholders, ",")))
 	}
 
@@ -569,18 +630,19 @@ func SearchImagesByTags(db *sql.DB, searchTokens []string) ([]Image, error) {
 		whereClauses = append(whereClauses, fmt.Sprintf("t.name IN (%s)", strings.Join(placeholders, ",")))
 	}
 
-	// Append WHERE conditions
 	if len(whereClauses) > 0 {
 		query += " WHERE " + strings.Join(whereClauses, " AND ")
 	}
 
-	// Append GROUP BY / HAVING only if we are actually checking tags
 	if len(normalTags) > 0 {
 		query += " GROUP BY f.id HAVING COUNT(DISTINCT t.id) = ?"
 		args = append(args, len(normalTags))
 	}
 
-	// Execute query
+	if orderByColor != "" {
+		query += " ORDER BY " + orderByColor + " LIMIT 50"
+	}
+
 	rows, err := db.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search: %w", err)
@@ -743,4 +805,129 @@ func ExportImagesToAlbum(db *sql.DB, albumName string, imageIDs []int64, gallery
 	}
 
 	return nil
+}
+
+func GetImagesWithoutMetadata(db *sql.DB) ([]Image, error) {
+	query := `
+		SELECT id 
+		FROM files 
+		WHERE active_metadata_id IS NULL AND hasDuplicate IS NULL
+	`
+	rows, err := db.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query unmatched images: %w", err)
+	}
+	defer rows.Close()
+
+	var fileIDs []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("failed to scan file ID: %w", err)
+		}
+		fileIDs = append(fileIDs, id)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating unmatched rows: %w", err)
+	}
+
+	var images []Image
+	for _, id := range fileIDs {
+		img, err := GetImageByID(db, id, true)
+		if err != nil {
+			fmt.Printf("Warning: failed to load unmatched image %d: %v\n", id, err)
+			continue
+		}
+		images = append(images, *img)
+	}
+
+	return images, nil
+}
+
+// threshold determines how "strict" the match is (e.g., 2000 is very strict, 10000 is loose).
+func SearchImagesByColor(db *sql.DB, targetR, targetG, targetB, threshold int) ([]Image, error) {
+	// calculate the squared Euclidean distance directly in SQL.
+	query := `
+		SELECT DISTINCT file_id, 
+		       ((r - ?) * (r - ?) + (g - ?) * (g - ?) + (b - ?) * (b - ?)) as distance
+		FROM image_colors
+		WHERE distance <= ?
+		ORDER BY distance ASC
+		LIMIT 50
+	`
+
+	// Pass the target RGB variables twice each to satisfy the math, plus the threshold
+	rows, err := db.Query(query, targetR, targetR, targetG, targetG, targetB, targetB, threshold)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query colors: %w", err)
+	}
+	defer rows.Close()
+
+	var fileIDs []int64
+	for rows.Next() {
+		var id int64
+		var distance int
+		if err := rows.Scan(&id, &distance); err != nil {
+			return nil, err
+		}
+		fileIDs = append(fileIDs, id)
+	}
+
+	var images []Image
+	for _, id := range fileIDs {
+		img, err := GetImageByID(db, id, false)
+		if err != nil {
+			continue
+		}
+		images = append(images, *img)
+	}
+
+	return images, nil
+}
+
+// Brightness ranges from 0 (pitch black) to 255 (pure white).
+func SearchImagesByBrightness(db *sql.DB, minBrightness, maxBrightness float64) ([]Image, error) {
+	query := `
+		SELECT file_id, 
+		       AVG((0.299 * r) + (0.587 * g) + (0.114 * b)) as avg_brightness
+		FROM image_colors
+		GROUP BY file_id
+		HAVING avg_brightness >= ? AND avg_brightness <= ?
+		ORDER BY avg_brightness ASC
+		LIMIT 50
+	`
+
+	rows, err := db.Query(query, minBrightness, maxBrightness)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query brightness: %w", err)
+	}
+	defer rows.Close()
+
+	var fileIDs []int64
+	for rows.Next() {
+		var id int64
+		var avgBrightness float64
+		if err := rows.Scan(&id, &avgBrightness); err != nil {
+			return nil, err
+		}
+		fileIDs = append(fileIDs, id)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating brightness rows: %w", err)
+	}
+
+	// Fetch full image records using your existing function
+	var images []Image
+	for _, id := range fileIDs {
+		img, err := GetImageByID(db, id, false)
+		if err != nil {
+			fmt.Printf("Warning: failed to load image %d: %v\n", id, err)
+			continue
+		}
+		images = append(images, *img)
+	}
+
+	return images, nil
 }

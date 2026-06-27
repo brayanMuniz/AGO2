@@ -5,7 +5,6 @@ import TopBar from '../components/TopBar';
 const SettingsLayout: React.FC = () => {
   const navItems = [
     { path: '/settings', label: 'General', exact: true },
-    { path: '/settings/sync', label: 'Sync' },
     { path: '/settings/match', label: 'Match' },
     { path: '/settings/duplicates', label: 'Duplicates' },
   ];
