@@ -81,6 +81,17 @@ function mergeSuggestions(...lists: TagSuggestion[][]): TagSuggestion[] {
   return Array.from(merged.values());
 }
 
+// Helpers for the new Appearance Filters
+const extractBrightness = (query: string): [number, number] | null => {
+  const match = query.match(/(?:^|\s)brightness:(\d+)-(\d+)(?:\s|$)/);
+  return match ? [parseInt(match[1], 10), parseInt(match[2], 10)] : null;
+};
+
+const extractColor = (query: string): string | null => {
+  const match = query.match(/(?:^|\s)color:(#[0-9a-fA-F]{6})(?:\s|$)/);
+  return match ? match[1] : null;
+};
+
 const SearchPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const tagsQuery = searchParams.get('tags') || '';
@@ -96,8 +107,25 @@ const SearchPage: React.FC = () => {
   const [selectionMode, setSelectionMode] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
 
+  // States for Appearance UI
+  const [brightness, setBrightness] = useState<[number, number]>([0, 255]);
+  const [color, setColor] = useState<string>('#000000');
+  const [hasColor, setHasColor] = useState(false);
+
   useEffect(() => {
     setFilters(parseSearchQuery(tagsQuery));
+
+    // Sync Appearance UI with URL tags
+    const b = extractBrightness(tagsQuery);
+    setBrightness(b || [0, 255]);
+
+    const c = extractColor(tagsQuery);
+    if (c) {
+      setColor(c);
+      setHasColor(true);
+    } else {
+      setHasColor(false);
+    }
   }, [tagsQuery]);
 
   useEffect(() => {
@@ -180,6 +208,41 @@ const SearchPage: React.FC = () => {
     debounceRef.current = window.setTimeout(updateUrl, 350);
   };
 
+  // Dedicated URL updater for Appearance tags (Color & Brightness)
+  const updateSpecialFilter = (prefix: string, newValue: string | null) => {
+    let tokens = tagsQuery.split(/\s+/).filter(Boolean);
+    tokens = tokens.filter((t) => !t.startsWith(prefix));
+
+    if (newValue) tokens.push(newValue);
+
+    const newQuery = tokens.join(' ');
+
+    if (debounceRef.current) window.clearTimeout(debounceRef.current);
+    debounceRef.current = window.setTimeout(() => {
+      setSearchParams(newQuery ? { tags: newQuery } : {});
+    }, 350);
+  };
+
+  const handleColorChange = (newColor: string) => {
+    setColor(newColor);
+    setHasColor(true);
+    updateSpecialFilter('color:', `color:${newColor}`);
+  };
+
+  const handleClearColor = () => {
+    setHasColor(false);
+    updateSpecialFilter('color:', null);
+  };
+
+  const handleBrightnessChange = (min: number, max: number) => {
+    setBrightness([min, max]);
+    if (min === 0 && max === 255) {
+      updateSpecialFilter('brightness:', null);
+    } else {
+      updateSpecialFilter('brightness:', `brightness:${min}-${max}`);
+    }
+  };
+
   const handleAddTag = (category: TagCategory, name: string) => {
     applyFilters(addTagPill(filters, createTagPill(category, name)));
   };
@@ -192,8 +255,6 @@ const SearchPage: React.FC = () => {
     const nextValue = !currentValue;
     const imageToUpdate = images.find((img) => img.id === imageId);
 
-    // Evaluate if the active search specifically filters for or against favorites.
-    // We check `filters` object (if you store it there) and fallback to parsing the raw query string.
     const isFilteringFavorites =
       (filters as any).favorite === true ||
       /(?:^|\s)favorite:true/.test(tagsQuery) ||
@@ -208,7 +269,6 @@ const SearchPage: React.FC = () => {
       (nextValue === true && isFilteringNotFavorites) ||
       (nextValue === false && isFilteringFavorites);
 
-    // Optimistic Update
     setImages((prev) => {
       if (shouldRemove) {
         return prev.filter((img) => img.id !== imageId);
@@ -227,10 +287,8 @@ const SearchPage: React.FC = () => {
     try {
       await updateFavorite(imageId, nextValue);
     } catch {
-      // Revert Optimistic Update on failure
       setImages((prev) => {
         if (shouldRemove && imageToUpdate) {
-          // If the API fails, put the image back into the view
           return [...prev, imageToUpdate].sort((a, b) => b.id - a.id);
         }
         return prev.map((img) =>
@@ -296,6 +354,101 @@ const SearchPage: React.FC = () => {
               onChange={(next) => applyFilters(next, true)}
               onSliderChange={(next) => applyFilters(next, false)}
             />
+
+            {/* --- NEW APPEARANCE FILTERS --- */}
+            <div className="mt-4 pt-4 border-t border-[#2a2a35]">
+              <h3 className="font-bold text-gray-200 mb-3 text-xs uppercase tracking-wider">Appearance</h3>
+
+              {/* Color Palette */}
+              <div className="mb-5">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm text-gray-400">Color Palette</span>
+                  {hasColor && (
+                    <button
+                      onClick={handleClearColor}
+                      className="text-xs text-red-400 hover:text-red-300 transition-colors"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="color"
+                    value={hasColor ? color : '#000000'}
+                    onChange={(e) => handleColorChange(e.target.value)}
+                    className="w-8 h-8 rounded cursor-pointer bg-transparent border-0 p-0"
+                    title="Pick a color"
+                  />
+                  <span className="text-xs text-gray-500 font-mono">
+                    {hasColor ? color.toUpperCase() : 'None selected'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Dual-Thumb Brightness Slider */}
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-sm text-gray-400">Brightness</span>
+                  {(brightness[0] > 0 || brightness[1] < 255) && (
+                    <button
+                      onClick={() => handleBrightnessChange(0, 255)}
+                      className="text-xs text-red-400 hover:text-red-300 transition-colors"
+                    >
+                      Reset
+                    </button>
+                  )}
+                </div>
+
+                <div className="relative w-full h-1 mt-2 mb-4 flex items-center">
+                  {/* Track Background */}
+                  <div className="absolute w-full h-1 bg-[#2a2a35] rounded-full"></div>
+
+                  {/* Active Track */}
+                  <div
+                    className="absolute h-1 bg-[#60a5fa] rounded-full pointer-events-none"
+                    style={{
+                      left: `${(brightness[0] / 255) * 100}%`,
+                      right: `${100 - (brightness[1] / 255) * 100}%`
+                    }}
+                  ></div>
+
+                  {/* Min Input */}
+                  <input
+                    type="range" min="0" max="255"
+                    value={brightness[0]}
+                    onChange={(e) => {
+                      const val = Math.min(parseInt(e.target.value), brightness[1] - 1);
+                      handleBrightnessChange(val, brightness[1]);
+                    }}
+                    className="absolute w-full appearance-none bg-transparent pointer-events-none z-20 focus:outline-none
+                               [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:pointer-events-auto [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:bg-[#60a5fa] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer 
+                               [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:pointer-events-auto [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:bg-[#60a5fa] [&::-moz-range-thumb]:border-none [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:cursor-pointer"
+                  />
+
+                  {/* Max Input */}
+                  <input
+                    type="range" min="0" max="255"
+                    value={brightness[1]}
+                    onChange={(e) => {
+                      const val = Math.max(parseInt(e.target.value), brightness[0] + 1);
+                      handleBrightnessChange(brightness[0], val);
+                    }}
+                    className="absolute w-full appearance-none bg-transparent pointer-events-none z-20 focus:outline-none
+                               [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:pointer-events-auto [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:bg-[#60a5fa] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer 
+                               [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:pointer-events-auto [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:bg-[#60a5fa] [&::-moz-range-thumb]:border-none [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:cursor-pointer"
+                  />
+                </div>
+
+                {/* Value display */}
+                <div className="flex justify-between text-xs text-gray-500 font-mono">
+                  <span>{brightness[0]}</span>
+                  <span>{brightness[1]}</span>
+                </div>
+              </div>
+            </div>
+            {/* --- END NEW APPEARANCE FILTERS --- */}
+
           </div>
 
           <div className="flex-1 overflow-y-auto p-4 hide-scrollbar">

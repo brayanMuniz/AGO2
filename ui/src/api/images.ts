@@ -1,12 +1,16 @@
 export async function updateFavorite(id: number, isFavorite: boolean): Promise<void> {
-  const response = await fetch(`/api/image/${id}/favorite`, {
+  // Point to the new abstract endpoint, but keep the specific arguments
+  const response = await fetch(`/api/image/${id}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
+    // Only send the field this specific function cares about
     body: JSON.stringify({ is_favorite: isFavorite }),
   });
 
   if (!response.ok) {
-    throw new Error('Failed to update favorite status.');
+    // Attempt to grab the specific error message from your Go backend
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData.error || 'Failed to update favorite status.');
   }
 }
 

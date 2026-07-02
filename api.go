@@ -283,8 +283,8 @@ func (a *App) handleDeleteImage(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// PATCH /api/image/{id}/favorite
-func (a *App) handleUpdateFavorite(w http.ResponseWriter, r *http.Request) {
+// PATCH /api/image/{id}
+func (a *App) handleImageUpdate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPatch && r.Method != http.MethodPut {
 		sendJSONError(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -301,9 +301,9 @@ func (a *App) handleUpdateFavorite(w http.ResponseWriter, r *http.Request) {
 		sendJSONError(w, "Invalid 'id' parameter; must be an integer", http.StatusBadRequest)
 		return
 	}
-
 	var reqBody struct {
-		IsFavorite bool `json:"is_favorite"`
+		IsFavorite       *bool  `json:"is_favorite,omitempty"`
+		ActiveMetadataID *int64 `json:"active_metadata_id,omitempty"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
@@ -311,13 +311,18 @@ func (a *App) handleUpdateFavorite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = UpdateImageFavoriteStatus(a.DB, id, reqBody.IsFavorite)
+	params := UpdateImageParams{
+		IsFavorite:       reqBody.IsFavorite,
+		ActiveMetadataID: reqBody.ActiveMetadataID,
+	}
+
+	err = UpdateImage(a.DB, id, params)
 	if err != nil {
 		if strings.Contains(err.Error(), "no file found") {
 			sendJSONError(w, err.Error(), http.StatusNotFound)
 		} else {
-			sendJSONError(w, "Failed to update favorite status", http.StatusInternalServerError)
-			fmt.Printf("Database error updating favorite status for image %d: %v\n", id, err)
+			sendJSONError(w, "Failed to update image", http.StatusInternalServerError)
+			fmt.Printf("Database error updating image %d: %v\n", id, err)
 		}
 		return
 	}
@@ -325,9 +330,9 @@ func (a *App) handleUpdateFavorite(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]any{
-		"message":     fmt.Sprintf("Successfully updated favorite status for image ID %d", id),
-		"is_favorite": reqBody.IsFavorite,
+		"message": fmt.Sprintf("Successfully updated image ID %d", id),
 	})
+
 }
 
 // GET /api/images/unmatched
