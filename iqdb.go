@@ -23,12 +23,10 @@ type IQDBMatch struct {
 
 // MarshalJSON customizes the JSON output to hide specific fields from the frontend response
 func (p *Post) MarshalJSON() ([]byte, error) {
-	// Create an alias to prevent infinite loops during marshaling
 	type Alias Post
 
 	return json.Marshal(&struct {
 		*Alias
-		// We shadow the fields we want to hide and add 'omitempty'
 		FileURL               string `json:"file_url,omitempty"`
 		LargeFileURL          string `json:"large_file_url,omitempty"`
 		RawTagStringArtist    string `json:"tag_string_artist,omitempty"`
@@ -37,8 +35,7 @@ func (p *Post) MarshalJSON() ([]byte, error) {
 		RawTagStringGeneral   string `json:"tag_string_general,omitempty"`
 		RawTagStringMeta      string `json:"tag_string_meta,omitempty"`
 	}{
-		Alias: (*Alias)(p),
-		// Setting these to empty strings triggers the 'omitempty' rule, erasing them from the JSON
+		Alias:                 (*Alias)(p),
 		FileURL:               "",
 		LargeFileURL:          "",
 		RawTagStringArtist:    "",
@@ -70,8 +67,9 @@ func (m *IQDBMatch) UnmarshalJSON(data []byte) error {
 type Post struct {
 	ID int `json:"id"`
 
-	FileURL      string `json:"-"`
-	LargeFileURL string `json:"-"`
+	FileURL        string `json:"-"`
+	LargeFileURL   string `json:"-"`
+	PreviewFileURL string `json:"preview_file_url"`
 
 	Rating      string `json:"rating"`
 	Source      string `json:"source"`

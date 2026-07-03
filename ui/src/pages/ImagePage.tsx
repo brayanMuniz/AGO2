@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import { updateFavorite } from '../api/images';
 import DeleteImageButton from '../components/DeleteImageButton';
 import DuplicateImageNotice from '../components/DuplicateImageNotice';
+import MetadataMatcher from '../components/MetadataMatcher';
 import FavoriteStar from '../components/FavoriteStar';
 import TopBar from '../components/TopBar';
 import type { ImageData } from '../types/image';
@@ -111,13 +112,23 @@ const ImagePage: React.FC = () => {
     );
   }
 
+  // --- Handling Missing Data and Duplicates ---
   if (!imageData.main_data) {
+    if (imageData.has_duplicate) {
+      return (
+        <DuplicateImageNotice
+          fileName={imageData.file_name}
+          hash={imageData.hash}
+          imageId={imageData.id}
+          originalImageId={imageData.has_duplicate}
+        />
+      );
+    }
+
     return (
-      <DuplicateImageNotice
-        fileName={imageData.file_name}
-        hash={imageData.hash}
+      <MetadataMatcher
         imageId={imageData.id}
-        originalImageId={imageData.has_duplicate ?? undefined}
+        fileName={imageData.file_name}
       />
     );
   }

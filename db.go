@@ -103,8 +103,11 @@ func createTables(db *sql.DB) error {
 	    FOREIGN KEY (file_id) REFERENCES files (id) ON DELETE CASCADE
 	);
 
-	-- Index for faster lookups when we do math on these columns
+	-- Index for faster lookups when we doing math on colors columns
 	CREATE INDEX IF NOT EXISTS idx_image_colors_rgb ON image_colors(r, g, b);
+
+	-- Speeds up "Missing Data" and "Duplicate" queries
+	CREATE INDEX IF NOT EXISTS idx_files_status ON files(active_metadata_id, hasDuplicate);
 	`
 	_, err := db.Exec(schema)
 	return err
@@ -592,6 +595,10 @@ func SearchImagesByTags(db *sql.DB, searchTokens []string) ([]Image, error) {
 				 FROM image_colors WHERE file_id = f.id) ASC
 			`, r, r, g, g, b, b)
 
+		} else if lowerToken == "is:missing" {
+			whereClauses = append(whereClauses, "f.active_metadata_id IS NULL AND f.hasDuplicate IS NULL")
+		} else if lowerToken == "is:duplicate" {
+			whereClauses = append(whereClauses, "f.hasDuplicate IS NOT NULL")
 		} else {
 			normalTags = append(normalTags, strings.TrimSpace(token))
 		}

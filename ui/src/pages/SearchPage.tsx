@@ -112,6 +112,10 @@ const SearchPage: React.FC = () => {
   const [color, setColor] = useState<string>('#000000');
   const [hasColor, setHasColor] = useState(false);
 
+  // Derived states for Status filters
+  const isMissing = /(?:^|\s)is:missing(?:\s|$)/.test(tagsQuery);
+  const isDuplicate = /(?:^|\s)is:duplicate(?:\s|$)/.test(tagsQuery);
+
   useEffect(() => {
     setFilters(parseSearchQuery(tagsQuery));
 
@@ -208,7 +212,7 @@ const SearchPage: React.FC = () => {
     debounceRef.current = window.setTimeout(updateUrl, 350);
   };
 
-  // Dedicated URL updater for Appearance tags (Color & Brightness)
+  // Dedicated URL updater for Appearance tags (Color & Brightness) and Status flags
   const updateSpecialFilter = (prefix: string, newValue: string | null) => {
     let tokens = tagsQuery.split(/\s+/).filter(Boolean);
     tokens = tokens.filter((t) => !t.startsWith(prefix));
@@ -355,7 +359,7 @@ const SearchPage: React.FC = () => {
               onSliderChange={(next) => applyFilters(next, false)}
             />
 
-            {/* --- NEW APPEARANCE FILTERS --- */}
+            {/* --- APPEARANCE FILTERS --- */}
             <div className="mt-4 pt-4 border-t border-[#2a2a35]">
               <h3 className="font-bold text-gray-200 mb-3 text-xs uppercase tracking-wider">Appearance</h3>
 
@@ -447,7 +451,32 @@ const SearchPage: React.FC = () => {
                 </div>
               </div>
             </div>
-            {/* --- END NEW APPEARANCE FILTERS --- */}
+
+            {/* --- NEW STATUS FILTERS --- */}
+            <div className="mt-4 pt-4 border-t border-[#2a2a35]">
+              <h3 className="font-bold text-gray-200 mb-3 text-xs uppercase tracking-wider">Status</h3>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => updateSpecialFilter('is:missing', isMissing ? null : 'is:missing')}
+                  className={`px-3 py-1.5 rounded text-xs transition-colors border ${isMissing
+                      ? 'border-[#60a5fa] bg-[#60a5fa]/10 text-[#60a5fa]'
+                      : 'border-[#2a2a35] text-gray-400 hover:text-gray-200 hover:border-gray-500'
+                    }`}
+                >
+                  Missing Data
+                </button>
+                <button
+                  onClick={() => updateSpecialFilter('is:duplicate', isDuplicate ? null : 'is:duplicate')}
+                  className={`px-3 py-1.5 rounded text-xs transition-colors border ${isDuplicate
+                      ? 'border-[#60a5fa] bg-[#60a5fa]/10 text-[#60a5fa]'
+                      : 'border-[#2a2a35] text-gray-400 hover:text-gray-200 hover:border-gray-500'
+                    }`}
+                >
+                  Duplicate
+                </button>
+              </div>
+            </div>
+            {/* --- END NEW STATUS FILTERS --- */}
 
           </div>
 
