@@ -55,7 +55,7 @@ func sendJSONError(w http.ResponseWriter, message string, statusCode int) {
 	json.NewEncoder(w).Encode(map[string]string{"error": message})
 }
 
-// /api/image?id=X
+// /api/image/{id}
 func (a *App) handleGetImage(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		sendJSONError(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -88,6 +88,52 @@ func (a *App) handleGetImage(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(img)
+}
+
+// /api/image/{id}/matches
+func (a *App) handleGetImageMatches(w http.ResponseWriter, r *http.Request) {
+
+	if r.Method != http.MethodGet {
+		sendJSONError(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	idStr := r.PathValue("id")
+	if idStr == "" {
+		sendJSONError(w, "Missing 'id' path parameter", http.StatusBadRequest)
+		return
+	}
+
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		sendJSONError(w, "Invalid 'id' parameter; must be an integer", http.StatusBadRequest)
+		return
+	}
+
+	img, err := GetImageByID(a.DB, id, false)
+	if err != nil {
+		if strings.Contains(err.Error(), "no file found") {
+			sendJSONError(w, err.Error(), http.StatusNotFound)
+		} else {
+			sendJSONError(w, "Failed to fetch image", http.StatusInternalServerError)
+			fmt.Printf("Database error fetching image %d: %v\n", id, err)
+		}
+		return
+	}
+
+	apiKey := os.Getenv("DANBOORU_KEY")
+	userName := os.Getenv("USERNAME")
+	fileLocation := "./Gallery/" + img.FileName
+
+	matches, err := iqdb_upload_request(apiKey, userName, fileLocation)
+	if err != nil {
+		sendJSONError(w, "Failed to fetch image data", http.StatusInternalServerError)
+		fmt.Printf("Could not get iqdb request for %d", id)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(matches)
 }
 
 // /api/search?tags=tag1+tag2

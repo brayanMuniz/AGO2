@@ -42,6 +42,7 @@ func main() {
 	}
 
 	http.HandleFunc("GET /api/image/{id}", app.handleGetImage)
+	http.HandleFunc("GET /api/image/{id}/matches", app.handleGetImageMatches)
 	http.HandleFunc("GET /api/images/unmatched", app.handleGetUnmatchedImages)
 	http.HandleFunc("GET /api/search", app.handleSearch)
 	http.HandleFunc("GET /api/process-gallery/status", app.handleGetJobStatus)
