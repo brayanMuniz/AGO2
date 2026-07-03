@@ -330,6 +330,27 @@ func (a *App) handleDeleteImage(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func DownloadAndReplaceImage(url, destPath string) error {
+	resp, err := http.Get(url)
+	if err != nil {
+		return fmt.Errorf("failed to download image: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("bad status fetching image: %s", resp.Status)
+	}
+
+	out, err := os.Create(destPath)
+	if err != nil {
+		return fmt.Errorf("failed to create local file: %w", err)
+	}
+	defer out.Close()
+
+	_, err = io.Copy(out, resp.Body)
+	return err
+}
+
 // PATCH /api/image/{id}
 func (a *App) handleImageUpdate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPatch && r.Method != http.MethodPut {
@@ -345,12 +366,15 @@ func (a *App) handleImageUpdate(w http.ResponseWriter, r *http.Request) {
 
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
-		sendJSONError(w, "Invalid 'id' parameter; must be an integer", http.StatusBadRequest)
+		sendJSONError(w, "Invalid 'id' parameter", http.StatusBadRequest)
 		return
 	}
+
 	var reqBody struct {
 		IsFavorite       *bool  `json:"is_favorite,omitempty"`
 		ActiveMetadataID *int64 `json:"active_metadata_id,omitempty"`
+		MainData         *Post  `json:"main_data,omitempty"`
+		ReplaceImage     *bool  `json:"replace_image,omitempty"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
@@ -361,17 +385,43 @@ func (a *App) handleImageUpdate(w http.ResponseWriter, r *http.Request) {
 	params := UpdateImageParams{
 		IsFavorite:       reqBody.IsFavorite,
 		ActiveMetadataID: reqBody.ActiveMetadataID,
+		MainData:         reqBody.MainData,
+		ReplaceImage:     reqBody.ReplaceImage,
+	}
+
+	var filename string
+	err = a.DB.QueryRow("SELECT filename FROM files WHERE id = ?", id).Scan(&filename)
+	if err != nil {
+		sendJSONError(w, "Image not found", http.StatusNotFound)
+		return
 	}
 
 	err = UpdateImage(a.DB, id, params)
 	if err != nil {
-		if strings.Contains(err.Error(), "no file found") {
-			sendJSONError(w, err.Error(), http.StatusNotFound)
-		} else {
-			sendJSONError(w, "Failed to update image", http.StatusInternalServerError)
-			fmt.Printf("Database error updating image %d: %v\n", id, err)
-		}
+		sendJSONError(w, "Failed to update image metadata", http.StatusInternalServerError)
+		fmt.Printf("Database error updating image %d: %v\n", id, err)
 		return
+	}
+
+	if params.ReplaceImage != nil && *params.ReplaceImage && params.MainData != nil {
+		targetURL := params.MainData.FileURL
+		if targetURL == "" {
+			targetURL := params.MainData.LargeFileURL // funny enough this is smaller than regular FileURL
+		}
+
+		if targetURL != "" {
+			destPath := filepath.Join("./Gallery/", filename)
+			err := DownloadAndReplaceImage(targetURL, destPath)
+			if err != nil {
+				fmt.Printf("Warning: Database updated, but failed to replace physical file %s: %v\n", filename, err)
+				// We still return 200 OK since metadata linked
+			} else {
+				fmt.Printf("Successfully replaced physical file for: %s\n", filename)
+			}
+		} else {
+			fmt.Println("Bro theres not target_url")
+
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -379,7 +429,6 @@ func (a *App) handleImageUpdate(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]any{
 		"message": fmt.Sprintf("Successfully updated image ID %d", id),
 	})
-
 }
 
 // GET /api/images/unmatched

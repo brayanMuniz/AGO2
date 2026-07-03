@@ -27,8 +27,6 @@ func (p *Post) MarshalJSON() ([]byte, error) {
 
 	return json.Marshal(&struct {
 		*Alias
-		FileURL               string `json:"file_url,omitempty"`
-		LargeFileURL          string `json:"large_file_url,omitempty"`
 		RawTagStringArtist    string `json:"tag_string_artist,omitempty"`
 		RawTagStringCharacter string `json:"tag_string_character,omitempty"`
 		RawTagStringCopyright string `json:"tag_string_copyright,omitempty"`
@@ -36,8 +34,6 @@ func (p *Post) MarshalJSON() ([]byte, error) {
 		RawTagStringMeta      string `json:"tag_string_meta,omitempty"`
 	}{
 		Alias:                 (*Alias)(p),
-		FileURL:               "",
-		LargeFileURL:          "",
 		RawTagStringArtist:    "",
 		RawTagStringCharacter: "",
 		RawTagStringCopyright: "",
@@ -67,8 +63,8 @@ func (m *IQDBMatch) UnmarshalJSON(data []byte) error {
 type Post struct {
 	ID int `json:"id"`
 
-	FileURL        string `json:"-"`
-	LargeFileURL   string `json:"-"`
+	FileURL        string `json:"file_url"`
+	LargeFileURL   string `json:"large_file_url"`
 	PreviewFileURL string `json:"preview_file_url"`
 
 	Rating      string `json:"rating"`

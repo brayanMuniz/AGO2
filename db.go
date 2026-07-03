@@ -716,17 +716,19 @@ func DeleteImageByID(db *sql.DB, fileID int64, galleryDir string) error {
 type UpdateImageParams struct {
 	IsFavorite       *bool
 	ActiveMetadataID *int64 // Use 0 or a negative number to clear the metadata
+	MainData         *Post
+	ReplaceImage     *bool
 }
 
 func UpdateImage(db *sql.DB, fileID int64, params UpdateImageParams) error {
-	// verify the image exists
-	var exists bool
-	err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM files WHERE id = ?)", fileID).Scan(&exists)
+	// 1. Verify image exists and get the filename (required for metadata_records)
+	var filename string
+	err := db.QueryRow("SELECT filename FROM files WHERE id = ?", fileID).Scan(&filename)
 	if err != nil {
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("no file found with ID %d", fileID)
+		}
 		return fmt.Errorf("failed to check image existence: %w", err)
-	}
-	if !exists {
-		return fmt.Errorf("no file found with ID %d", fileID)
 	}
 
 	var setClauses []string
@@ -737,13 +739,51 @@ func UpdateImage(db *sql.DB, fileID int64, params UpdateImageParams) error {
 		args = append(args, *params.IsFavorite)
 	}
 
-	if params.ActiveMetadataID != nil {
+	// 2. If we receive main_data, insert it into metadata_records
+	if params.MainData != nil {
+		post := params.MainData
+
+		query := `
+			INSERT INTO metadata_records 
+			(filename, provider_name, provider_id, score, file_url, large_file_url, rating, source, image_height, image_width, file_size)
+			VALUES (?, 'danbooru', ?, 100.0, ?, ?, ?, ?, ?, ?, ?)
+		`
+
+		execRes, err := db.Exec(query,
+			filename,
+			fmt.Sprintf("%d", post.ID), // The Danbooru ID
+			post.FileURL,
+			post.LargeFileURL,
+			post.Rating,
+			post.Source,
+			post.ImageHeight,
+			post.ImageWidth,
+			post.FileSize,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to insert metadata record: %w", err)
+		}
+
+		// Grab the internal auto-incremented ID
+		newRecordID, _ := execRes.LastInsertId()
+
+		// Save all the tags
+		saveTags(db, newRecordID, post.TagsArtist, "artist")
+		saveTags(db, newRecordID, post.TagsCharacters, "character")
+		saveTags(db, newRecordID, post.TagsCopyright, "copyright")
+		saveTags(db, newRecordID, post.TagsGeneral, "general")
+		saveTags(db, newRecordID, post.TagsMeta, "meta")
+
+		// Tell the files table to use this new internal ID
+		setClauses = append(setClauses, "active_metadata_id = ?")
+		args = append(args, newRecordID)
+
+	} else if params.ActiveMetadataID != nil {
+		// Fallback for clearing metadata or using an existing ID
 		id := *params.ActiveMetadataID
 		if id <= 0 {
-			// Clear the metadata
 			setClauses = append(setClauses, "active_metadata_id = NULL")
 		} else {
-			// Set the metadata
 			setClauses = append(setClauses, "active_metadata_id = ?")
 			args = append(args, id)
 		}
@@ -753,17 +793,13 @@ func UpdateImage(db *sql.DB, fileID int64, params UpdateImageParams) error {
 		return nil
 	}
 
+	// 3. Finalize the file update
 	query := fmt.Sprintf("UPDATE files SET %s WHERE id = ?", strings.Join(setClauses, ", "))
 	args = append(args, fileID)
 
-	res, err := db.Exec(query, args...)
+	_, err = db.Exec(query, args...)
 	if err != nil {
-		return fmt.Errorf("failed to execute dynamic update: %w", err)
-	}
-
-	rowsAffected, _ := res.RowsAffected()
-	if rowsAffected == 0 {
-		return fmt.Errorf("no file found with ID %d", fileID)
+		return fmt.Errorf("failed to execute dynamic file update: %w", err)
 	}
 
 	return nil
