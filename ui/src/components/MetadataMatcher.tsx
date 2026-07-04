@@ -33,8 +33,13 @@ const MetadataMatcher: React.FC<MetadataMatcherProps> = ({
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Added states to capture the natural resolution of the base image
+  const [currentWidth, setCurrentWidth] = useState<number>(0);
+  const [currentHeight, setCurrentHeight] = useState<number>(0);
+
   // States for the inline confirmation and API call
   const [confirmMatchId, setConfirmMatchId] = useState<number | null>(null);
+  const [confirmAction, setConfirmAction] = useState<'match' | 'replace' | null>(null);
   const [updating, setUpdating] = useState<boolean>(false);
 
   const formatBytes = (bytes: number) => {
@@ -71,9 +76,19 @@ const MetadataMatcher: React.FC<MetadataMatcherProps> = ({
       .sort((a, b) => b.score - a.score);
   }, [matches, minScore]);
 
+  // Dynamic color for resolution comparison
+  const getResolutionColor = (matchWidth: number, matchHeight: number) => {
+    const currentArea = currentWidth * currentHeight;
+    const matchArea = matchWidth * matchHeight;
+    if (currentArea === 0) return 'text-gray-300';
+    if (matchArea > currentArea) return 'text-green-400 font-bold';
+    if (matchArea < currentArea) return 'text-red-400';
+    return 'text-gray-300';
+  };
+
   // Handles the API call when confirmed
   const handleConfirmMatch = async () => {
-    if (!confirmMatchId) return;
+    if (!confirmMatchId || !confirmAction) return;
 
     // Grab the full post object to send to the backend
     const match = matches.find((m) => m.post_id === confirmMatchId);
@@ -87,7 +102,8 @@ const MetadataMatcher: React.FC<MetadataMatcherProps> = ({
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          main_data: match.post, // Send the payload!
+          main_data: match.post,
+          replace_image: confirmAction === 'replace', // Map the action correctly
         }),
       });
 
@@ -97,6 +113,8 @@ const MetadataMatcher: React.FC<MetadataMatcherProps> = ({
       }
 
       setConfirmMatchId(null);
+      setConfirmAction(null);
+
       if (onMatchSelected) {
         onMatchSelected(confirmMatchId);
       } else {
@@ -116,24 +134,31 @@ const MetadataMatcher: React.FC<MetadataMatcherProps> = ({
       <div className="flex flex-1 p-6 gap-6 min-h-0">
 
         {/* LEFT PANEL */}
-        <div className="flex-1 bg-[#1c1c24] border border-[#2a2a35] rounded-xl p-4 flex items-center justify-center relative min-h-0 h-full">
+        <div className="flex-1 bg-[#1c1c24] border border-[#2a2a35] rounded-xl p-4 flex flex-col items-center justify-center relative min-h-0 h-full">
           <img
             src={`/images/${fileName}`}
             alt="Original file"
-            className="max-w-full max-h-full object-contain rounded-lg"
+            className="max-w-full max-h-[85%] object-contain rounded-lg mt-4"
+            onLoad={(e) => {
+              // Automatically grab resolution from the image itself
+              setCurrentWidth(e.currentTarget.naturalWidth);
+              setCurrentHeight(e.currentTarget.naturalHeight);
+            }}
             onError={(e) => {
               e.currentTarget.style.display = 'none';
               e.currentTarget.parentElement?.classList.add('bg-black');
             }}
           />
-          <div className="absolute top-4 left-4 bg-black/60 px-3 py-1 rounded text-sm text-gray-400">
-            {fileName}
+          <div className="mt-4 flex flex-wrap gap-4 text-sm text-gray-400 bg-black/40 px-4 py-2 rounded-lg">
+            <span>File: <span className="text-white">{fileName}</span></span>
+            {currentWidth > 0 && currentHeight > 0 && (
+              <span>Current Res: <span className="text-white font-mono">{currentWidth} × {currentHeight}</span></span>
+            )}
           </div>
         </div>
 
         {/* RIGHT PANEL */}
         <div className="w-[450px] flex flex-col shrink-0 bg-[#1c1c24] border border-[#2a2a35] rounded-xl overflow-hidden h-full">
-
           <div className="p-4 border-b border-[#2a2a35] flex items-center justify-between bg-[#15151a] shrink-0">
             <div className="flex flex-col gap-1 w-2/3">
               <label className="text-sm font-semibold text-gray-200 flex justify-between">
@@ -180,7 +205,6 @@ const MetadataMatcher: React.FC<MetadataMatcherProps> = ({
                   key={match.post_id}
                   className="flex gap-4 p-3 bg-[#111115] border border-[#2a2a35] hover:border-[#60a5fa] rounded-lg transition-colors group"
                 >
-
                   {/* Thumbnail */}
                   <div className="w-24 h-24 shrink-0 bg-[#1c1c24] border border-[#2a2a35] rounded overflow-hidden flex items-center justify-center text-gray-600 text-xs">
                     {match.post.preview_file_url ? (
@@ -196,7 +220,7 @@ const MetadataMatcher: React.FC<MetadataMatcherProps> = ({
 
                   <div className="flex flex-col justify-center text-[13px] text-gray-400 w-full overflow-hidden">
 
-                    {/* Header & Inline Button */}
+                    {/* Header & Inline Buttons */}
                     <div className="flex justify-between items-center mb-1 h-8">
                       <span className="font-bold text-lg text-white">
                         <span className={match.score > 90 ? 'text-green-400' : match.score > 70 ? 'text-[#60a5fa]' : 'text-yellow-400'}>
@@ -206,7 +230,9 @@ const MetadataMatcher: React.FC<MetadataMatcherProps> = ({
 
                       {confirmMatchId === match.post_id ? (
                         <div className="flex items-center gap-2">
-                          <span className="text-xs text-[#60a5fa]">Link?</span>
+                          <span className="text-xs text-[#60a5fa] font-semibold">
+                            {confirmAction === 'replace' ? 'Replace file?' : 'Match data?'}
+                          </span>
                           <button
                             type="button"
                             onClick={handleConfirmMatch}
@@ -217,7 +243,10 @@ const MetadataMatcher: React.FC<MetadataMatcherProps> = ({
                           </button>
                           <button
                             type="button"
-                            onClick={() => setConfirmMatchId(null)}
+                            onClick={() => {
+                              setConfirmMatchId(null);
+                              setConfirmAction(null);
+                            }}
                             disabled={updating}
                             className="px-2 py-0.5 text-xs rounded bg-[#2a2a35] hover:bg-[#3a3a45] text-gray-300 cursor-pointer transition-colors"
                           >
@@ -225,13 +254,28 @@ const MetadataMatcher: React.FC<MetadataMatcherProps> = ({
                           </button>
                         </div>
                       ) : (
-                        <button
-                          type="button"
-                          onClick={() => setConfirmMatchId(match.post_id)}
-                          className="px-3 py-1.5 bg-[#2a2a35] hover:bg-[#60a5fa] hover:text-white text-gray-300 rounded-md text-xs font-semibold transition-colors border border-transparent hover:border-[#3b82f6] cursor-pointer"
-                        >
-                          Match Metadata
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setConfirmMatchId(match.post_id);
+                              setConfirmAction('match');
+                            }}
+                            className="px-3 py-1.5 bg-[#2a2a35] hover:bg-[#60a5fa] hover:text-white text-gray-300 rounded-md text-xs font-semibold transition-colors border border-transparent hover:border-[#3b82f6] cursor-pointer"
+                          >
+                            Match
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setConfirmMatchId(match.post_id);
+                              setConfirmAction('replace');
+                            }}
+                            className="px-3 py-1.5 bg-[#2a2a35] hover:text-white text-gray-300 rounded-md text-xs font-semibold transition-colors border border-transparent hover:border-red-400 hover:bg-red-500/20 cursor-pointer"
+                          >
+                            Replace
+                          </button>
+                        </div>
                       )}
                     </div>
 
@@ -243,11 +287,13 @@ const MetadataMatcher: React.FC<MetadataMatcherProps> = ({
                         rel="noreferrer"
                         className="text-[#60a5fa] hover:underline truncate block"
                       >
-                        https://danbooru.donmai.us/posts/{match.post_id}
+                        Danbooru ↗
                       </a>
 
-                      <span className="text-gray-500">Dimensions:</span>
-                      <span className="text-gray-300">{match.post.image_width} × {match.post.image_height}</span>
+                      <span className="text-gray-500">Res:</span>
+                      <span className={`${getResolutionColor(match.post.image_width, match.post.image_height)} font-mono`}>
+                        {match.post.image_width} × {match.post.image_height}
+                      </span>
 
                       <span className="text-gray-500">Size:</span>
                       <span className="text-gray-300">{formatBytes(match.post.file_size)}</span>

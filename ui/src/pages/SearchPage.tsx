@@ -107,6 +107,13 @@ const SearchPage: React.FC = () => {
   const [selectionMode, setSelectionMode] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
 
+  // Track which category tag lists are expanded
+  const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({});
+
+  // States for Sorting
+  const [sortBy, setSortBy] = useState<'none' | 'created_at' | 'file_size' | 'dimensions'>('none');
+  const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc');
+
   // States for Appearance UI
   const [brightness, setBrightness] = useState<[number, number]>([0, 255]);
   const [color, setColor] = useState<string>('#000000');
@@ -311,23 +318,81 @@ const SearchPage: React.FC = () => {
     });
   };
 
+  const toggleCategoryExpanded = (category: string) => {
+    setExpandedCategories((prev) => ({
+      ...prev,
+      [category]: !prev[category],
+    }));
+  };
+
+  // Sort Images
+  const sortedImages = useMemo(() => {
+    if (sortBy === 'none') {
+      return images;
+    }
+
+    return [...images].sort((a, b) => {
+      let valA = 0;
+      let valB = 0;
+
+      if (sortBy === 'file_size') {
+        valA = a.main_data?.file_size || (a as any).file_size || 0;
+        valB = b.main_data?.file_size || (b as any).file_size || 0;
+      } else if (sortBy === 'dimensions') {
+        const widthA = a.main_data?.image_width || (a as any).image_width || 0;
+        const heightA = a.main_data?.image_height || (a as any).image_height || 0;
+        valA = widthA * heightA;
+
+        const widthB = b.main_data?.image_width || (b as any).image_width || 0;
+        const heightB = b.main_data?.image_height || (b as any).image_height || 0;
+        valB = widthB * heightB;
+      } else if (sortBy === 'created_at') {
+        // Fallback to `any` cast to avoid TS errors if created_at isn't in the ImageData interface yet
+        valA = (a as any).created_at ? new Date((a as any).created_at).getTime() : a.id;
+        valB = (b as any).created_at ? new Date((b as any).created_at).getTime() : b.id;
+      }
+
+      if (valA < valB) return sortOrder === 'asc' ? -1 : 1;
+      if (valA > valB) return sortOrder === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }, [images, sortBy, sortOrder]);
+
   const renderTagList = (tags: TagCount[], category: TagCategory) => {
     if (!tags.length) return null;
 
-    return tags.map((tag) => (
-      <li key={`${category}:${tag.name}`}>
-        <button
-          type="button"
-          onClick={() => handleAddTag(category, tag.name)}
-          className="flex w-full items-start text-[13px] hover:underline cursor-pointer text-left"
-        >
-          <span className={`${CATEGORY_COLORS[category]} font-medium leading-tight flex-1`}>
-            {tag.name}
-          </span>
-          <span className="text-gray-500 ml-1">{tag.count}</span>
-        </button>
-      </li>
-    ));
+    const isExpanded = expandedCategories[category];
+    const visibleTags = isExpanded ? tags : tags.slice(0, 5);
+
+    return (
+      <React.Fragment key={category}>
+        {visibleTags.map((tag) => (
+          <li key={`${category}:${tag.name}`}>
+            <button
+              type="button"
+              onClick={() => handleAddTag(category, tag.name)}
+              className="flex w-full items-start text-[13px] hover:underline cursor-pointer text-left"
+            >
+              <span className={`${CATEGORY_COLORS[category]} font-medium leading-tight flex-1`}>
+                {tag.name}
+              </span>
+              <span className="text-gray-500 ml-1">{tag.count}</span>
+            </button>
+          </li>
+        ))}
+        {tags.length > 5 && (
+          <li>
+            <button
+              type="button"
+              onClick={() => toggleCategoryExpanded(category)}
+              className="text-xs text-[#60a5fa] hover:text-[#93c5fd] transition-colors mt-0.5 mb-2 ml-1"
+            >
+              {isExpanded ? 'Show less' : `+ Show ${tags.length - 5} more`}
+            </button>
+          </li>
+        )}
+      </React.Fragment>
+    );
   };
 
   const sidebarTags = SIDEBAR_SECTIONS.map(({ category, postKey }) => ({
@@ -459,8 +524,8 @@ const SearchPage: React.FC = () => {
                 <button
                   onClick={() => updateSpecialFilter('is:missing', isMissing ? null : 'is:missing')}
                   className={`px-3 py-1.5 rounded text-xs transition-colors border ${isMissing
-                      ? 'border-[#60a5fa] bg-[#60a5fa]/10 text-[#60a5fa]'
-                      : 'border-[#2a2a35] text-gray-400 hover:text-gray-200 hover:border-gray-500'
+                    ? 'border-[#60a5fa] bg-[#60a5fa]/10 text-[#60a5fa]'
+                    : 'border-[#2a2a35] text-gray-400 hover:text-gray-200 hover:border-gray-500'
                     }`}
                 >
                   Missing Data
@@ -468,8 +533,8 @@ const SearchPage: React.FC = () => {
                 <button
                   onClick={() => updateSpecialFilter('is:duplicate', isDuplicate ? null : 'is:duplicate')}
                   className={`px-3 py-1.5 rounded text-xs transition-colors border ${isDuplicate
-                      ? 'border-[#60a5fa] bg-[#60a5fa]/10 text-[#60a5fa]'
-                      : 'border-[#2a2a35] text-gray-400 hover:text-gray-200 hover:border-gray-500'
+                    ? 'border-[#60a5fa] bg-[#60a5fa]/10 text-[#60a5fa]'
+                    : 'border-[#2a2a35] text-gray-400 hover:text-gray-200 hover:border-gray-500'
                     }`}
                 >
                   Duplicate
@@ -492,8 +557,37 @@ const SearchPage: React.FC = () => {
         </aside>
 
         <main className="flex-1 flex flex-col overflow-hidden">
-          <div className="h-10 border-b border-[#2a2a35] flex items-center px-4 shrink-0 gap-3 text-xs">
+          <div className="h-12 border-b border-[#2a2a35] flex items-center px-4 shrink-0 gap-4 text-xs">
+
+            {/* SORTING CONTROLS */}
+            <div className="flex items-center gap-2 pr-4 border-r border-[#2a2a35]">
+              <span className="text-gray-500 font-medium">Sort by:</span>
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as 'none' | 'created_at' | 'file_size' | 'dimensions')}
+                className="bg-[#1c1c24] border border-[#2a2a35] text-gray-300 rounded px-2 py-1.5 outline-none focus:border-[#60a5fa] transition-colors cursor-pointer"
+              >
+                <option value="none">None (Default)</option>
+                <option value="created_at">Date Added</option>
+                <option value="file_size">File Size</option>
+                <option value="dimensions">Dimensions</option>
+              </select>
+              <button
+                type="button"
+                onClick={() => setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
+                disabled={sortBy === 'none'}
+                className={`w-7 h-7 flex items-center justify-center border rounded transition-colors ${sortBy === 'none'
+                  ? 'bg-[#15151a] border-[#2a2a35] text-gray-600 cursor-not-allowed'
+                  : 'bg-[#1c1c24] border-[#2a2a35] hover:border-[#60a5fa] hover:text-[#60a5fa] text-gray-300 cursor-pointer'
+                  }`}
+                title={sortBy === 'none' ? 'Sorting disabled' : sortOrder === 'asc' ? 'Ascending' : 'Descending'}
+              >
+                {sortOrder === 'asc' ? '↑' : '↓'}
+              </button>
+            </div>
+
             <span className="text-gray-400">{images.length} result(s)</span>
+
             <div className="ml-auto flex items-center gap-2">
               {selectionMode && (
                 <button
@@ -505,7 +599,7 @@ const SearchPage: React.FC = () => {
                       setSelectedIds(new Set(images.map((img) => img.id)));
                     }
                   }}
-                  className="px-2.5 py-1 rounded border border-[#2a2a35] text-gray-400 hover:text-gray-200 transition-colors"
+                  className="px-2.5 py-1.5 rounded border border-[#2a2a35] text-gray-400 hover:text-gray-200 transition-colors"
                 >
                   {allImagesSelected ? 'Deselect All' : 'Select All'}
                 </button>
@@ -517,7 +611,7 @@ const SearchPage: React.FC = () => {
                   setSelectionMode((prev) => !prev);
                   setSelectedIds(new Set());
                 }}
-                className={`px-2.5 py-1 rounded border transition-colors ${selectionMode
+                className={`px-2.5 py-1.5 rounded border transition-colors ${selectionMode
                   ? 'border-[#60a5fa] text-[#93c5fd] bg-[#60a5fa]/10'
                   : 'border-[#2a2a35] text-gray-400 hover:text-gray-200'
                   }`}
@@ -529,7 +623,7 @@ const SearchPage: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setShowExportModal(true)}
-                  className="px-2.5 py-1 rounded border border-[#2a2a35] text-gray-300 hover:text-white hover:border-[#60a5fa]"
+                  className="px-2.5 py-1.5 rounded border border-[#2a2a35] text-gray-300 hover:text-white hover:border-[#60a5fa]"
                 >
                   Export ({selectedImageIds.length})
                 </button>
@@ -542,53 +636,68 @@ const SearchPage: React.FC = () => {
               <div className="flex justify-center items-center h-full text-gray-400">Searching...</div>
             ) : error ? (
               <div className="flex justify-center items-center h-full text-red-400">{error}</div>
-            ) : images.length === 0 ? (
+            ) : sortedImages.length === 0 ? (
               <div className="flex justify-center items-center h-full text-gray-500">
                 {tagsQuery ? 'No images found for these tags.' : 'Add tags or filters to search.'}
               </div>
             ) : (
               <div className="flex flex-wrap gap-4 content-start">
-                {images.map((img) => (
-                  <div key={img.id} className="relative group">
-                    {selectionMode && (
-                      <label className="absolute top-2 left-2 z-10">
-                        <input
-                          type="checkbox"
-                          checked={selectedIds.has(img.id)}
-                          onChange={() => toggleSelected(img.id)}
-                          className="accent-[#60a5fa]"
-                        />
-                      </label>
-                    )}
+                {sortedImages.map((img) => {
+                  const isSelected = selectedIds.has(img.id);
+                  return (
+                    <div key={img.id} className="relative group">
+                      <Link
+                        to={selectionMode ? '#' : `/image/${img.id}`}
+                        onClick={(event) => {
+                          if (selectionMode) {
+                            event.preventDefault();
+                            toggleSelected(img.id);
+                          }
+                        }}
+                        className={`block relative rounded transition-all duration-200 ${selectionMode && isSelected
+                          ? 'ring-2 ring-[#60a5fa] bg-[#60a5fa]/10 scale-[0.98]'
+                          : 'hover:ring-1 hover:ring-[#60a5fa]'
+                          }`}
+                      >
+                        <div className={`bg-[#111115] p-1 rounded ${selectionMode && isSelected ? 'opacity-80' : ''}`}>
+                          <img
+                            src={img.thumbnail_path ? img.thumbnail_path : `/images/${img.file_name}`}
+                            alt={`Post ${img.id}`}
+                            className="object-contain"
+                            style={{ maxWidth: '250px', maxHeight: '250px' }}
+                            loading="lazy"
+                          />
+                        </div>
 
-                    <Link
-                      to={selectionMode ? '#' : `/image/${img.id}`}
-                      onClick={(event) => {
-                        if (selectionMode) event.preventDefault();
-                      }}
-                      className="block relative"
-                    >
-                      <div className="border border-transparent group-hover:border-[#60a5fa] transition-colors bg-[#111115] p-1">
-                        <img
-                          src={img.thumbnail_path ? img.thumbnail_path : `/images/${img.file_name}`}
-                          alt={`Post ${img.id}`}
-                          className="object-contain"
-                          style={{ maxWidth: '250px', maxHeight: '250px' }}
-                          loading="lazy"
-                        />
-                      </div>
+                        {/* Read-only visual checkbox indicator for selection mode */}
+                        {selectionMode && (
+                          <div className="absolute top-2 left-2 z-10 pointer-events-none bg-black/40 rounded-sm">
+                            <input
+                              type="checkbox"
+                              readOnly
+                              checked={isSelected}
+                              className="accent-[#60a5fa] pointer-events-none m-1 block"
+                            />
+                          </div>
+                        )}
 
-                      <div className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <FavoriteStar
-                          isFavorite={img.is_favorite ?? false}
-                          onToggle={() => handleToggleFavorite(img.id, img.is_favorite ?? false)}
-                          size="sm"
-                          className="bg-black/60"
-                        />
-                      </div>
-                    </Link>
-                  </div>
-                ))}
+                        {!selectionMode && (
+                          <div
+                            className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                            onClick={(e) => e.preventDefault()}
+                          >
+                            <FavoriteStar
+                              isFavorite={img.is_favorite ?? false}
+                              onToggle={() => handleToggleFavorite(img.id, img.is_favorite ?? false)}
+                              size="sm"
+                              className="bg-black/60"
+                            />
+                          </div>
+                        )}
+                      </Link>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
