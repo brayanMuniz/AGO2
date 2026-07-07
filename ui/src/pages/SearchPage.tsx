@@ -107,6 +107,9 @@ const SearchPage: React.FC = () => {
   const [selectionMode, setSelectionMode] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
 
+  // NEW: State to track deletion progress
+  const [isDeleting, setIsDeleting] = useState(false);
+
   // Track which category tag lists are expanded
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({});
 
@@ -325,6 +328,40 @@ const SearchPage: React.FC = () => {
     }));
   };
 
+  // --- NEW: Batch Delete Handler ---
+  const handleBatchDelete = async () => {
+    const idsToDelete = Array.from(selectedIds);
+    if (idsToDelete.length === 0) return;
+
+    if (!window.confirm(`Are you sure you want to permanently delete ${idsToDelete.length} images? This cannot be undone.`)) {
+      return;
+    }
+
+    setIsDeleting(true);
+    try {
+      const response = await fetch('/api/image/batch-delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: idsToDelete }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to delete images.');
+      }
+
+      // Optimistically remove deleted items from UI
+      setImages((prev) => prev.filter((img) => !selectedIds.has(img.id)));
+      setSelectedIds(new Set());
+      setSelectionMode(false);
+    } catch (err: any) {
+      alert(err.message || 'An error occurred during deletion.');
+      // Optionally trigger a fresh fetch here to sync actual state
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   // Sort Images
   const sortedImages = useMemo(() => {
     if (sortBy === 'none') {
@@ -347,7 +384,6 @@ const SearchPage: React.FC = () => {
         const heightB = b.main_data?.image_height || (b as any).image_height || 0;
         valB = widthB * heightB;
       } else if (sortBy === 'created_at') {
-        // Fallback to `any` cast to avoid TS errors if created_at isn't in the ImageData interface yet
         valA = (a as any).created_at ? new Date((a as any).created_at).getTime() : a.id;
         valB = (b as any).created_at ? new Date((b as any).created_at).getTime() : b.id;
       }
@@ -599,7 +635,8 @@ const SearchPage: React.FC = () => {
                       setSelectedIds(new Set(images.map((img) => img.id)));
                     }
                   }}
-                  className="px-2.5 py-1.5 rounded border border-[#2a2a35] text-gray-400 hover:text-gray-200 transition-colors"
+                  disabled={isDeleting}
+                  className="px-2.5 py-1.5 rounded border border-[#2a2a35] text-gray-400 hover:text-gray-200 transition-colors disabled:opacity-50"
                 >
                   {allImagesSelected ? 'Deselect All' : 'Select All'}
                 </button>
@@ -611,7 +648,8 @@ const SearchPage: React.FC = () => {
                   setSelectionMode((prev) => !prev);
                   setSelectedIds(new Set());
                 }}
-                className={`px-2.5 py-1.5 rounded border transition-colors ${selectionMode
+                disabled={isDeleting}
+                className={`px-2.5 py-1.5 rounded border transition-colors disabled:opacity-50 ${selectionMode
                   ? 'border-[#60a5fa] text-[#93c5fd] bg-[#60a5fa]/10'
                   : 'border-[#2a2a35] text-gray-400 hover:text-gray-200'
                   }`}
@@ -620,13 +658,26 @@ const SearchPage: React.FC = () => {
               </button>
 
               {selectionMode && selectedImageIds.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => setShowExportModal(true)}
-                  className="px-2.5 py-1.5 rounded border border-[#2a2a35] text-gray-300 hover:text-white hover:border-[#60a5fa]"
-                >
-                  Export ({selectedImageIds.length})
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setShowExportModal(true)}
+                    disabled={isDeleting}
+                    className="px-2.5 py-1.5 rounded border border-[#2a2a35] text-gray-300 hover:text-white hover:border-[#60a5fa] disabled:opacity-50 transition-colors"
+                  >
+                    Export ({selectedImageIds.length})
+                  </button>
+
+                  {/* --- NEW: Batch Delete Button --- */}
+                  <button
+                    type="button"
+                    onClick={handleBatchDelete}
+                    disabled={isDeleting}
+                    className="px-2.5 py-1.5 rounded border border-red-500/50 text-red-400 hover:bg-red-500/20 hover:text-red-300 hover:border-red-500 disabled:opacity-50 transition-colors"
+                  >
+                    {isDeleting ? 'Deleting...' : `Delete (${selectedImageIds.length})`}
+                  </button>
+                </>
               )}
             </div>
           </div>
@@ -651,13 +702,16 @@ const SearchPage: React.FC = () => {
                         onClick={(event) => {
                           if (selectionMode) {
                             event.preventDefault();
-                            toggleSelected(img.id);
+                            // Prevent selection clicks while a batch delete is happening
+                            if (!isDeleting) {
+                              toggleSelected(img.id);
+                            }
                           }
                         }}
                         className={`block relative rounded transition-all duration-200 ${selectionMode && isSelected
                           ? 'ring-2 ring-[#60a5fa] bg-[#60a5fa]/10 scale-[0.98]'
                           : 'hover:ring-1 hover:ring-[#60a5fa]'
-                          }`}
+                          } ${isDeleting ? 'pointer-events-none' : ''}`}
                       >
                         <div className={`bg-[#111115] p-1 rounded ${selectionMode && isSelected ? 'opacity-80' : ''}`}>
                           <img

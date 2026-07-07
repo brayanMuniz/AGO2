@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import TopBar from './TopBar';
+import DeleteImageButton from './DeleteImageButton';
 
 interface Post {
   id: number;
@@ -20,13 +21,17 @@ interface MatchRecord {
 interface MetadataMatcherProps {
   imageId: number;
   fileName: string;
+  fileSize?: number;
   onMatchSelected?: (postId: number) => void;
+  onClose?: () => void;
 }
 
 const MetadataMatcher: React.FC<MetadataMatcherProps> = ({
   imageId,
   fileName,
+  fileSize,
   onMatchSelected,
+  onClose,
 }) => {
   const [matches, setMatches] = useState<MatchRecord[]>([]);
   const [minScore, setMinScore] = useState<number>(70);
@@ -132,9 +137,25 @@ const MetadataMatcher: React.FC<MetadataMatcherProps> = ({
       <TopBar />
 
       <div className="flex flex-1 p-6 gap-6 min-h-0">
-
         {/* LEFT PANEL */}
         <div className="flex-1 bg-[#1c1c24] border border-[#2a2a35] rounded-xl p-4 flex flex-col items-center justify-center relative min-h-0 h-full">
+          {onClose && (
+            <button
+              onClick={onClose}
+              className="absolute top-4 left-4 bg-[#2a2a35] hover:bg-[#3a3a45] px-3 py-1.5 rounded text-sm text-gray-300 transition-colors cursor-pointer flex items-center gap-2"
+            >
+              &larr; Back to Image
+            </button>
+          )}
+
+          <div className="absolute top-4 right-4 bg-[#15151a] p-1 rounded-lg border border-[#2a2a35]">
+            <DeleteImageButton
+              imageId={imageId}
+              redirectTo="/"
+              variant="icon"
+            />
+          </div>
+
           <img
             src={`/images/${fileName}`}
             alt="Original file"
@@ -149,8 +170,12 @@ const MetadataMatcher: React.FC<MetadataMatcherProps> = ({
               e.currentTarget.parentElement?.classList.add('bg-black');
             }}
           />
+
           <div className="mt-4 flex flex-wrap gap-4 text-sm text-gray-400 bg-black/40 px-4 py-2 rounded-lg">
             <span>File: <span className="text-white">{fileName}</span></span>
+            {fileSize !== undefined && (
+              <span>Size: <span className="text-white">{formatBytes(fileSize)}</span></span>
+            )}
             {currentWidth > 0 && currentHeight > 0 && (
               <span>Current Res: <span className="text-white font-mono">{currentWidth} × {currentHeight}</span></span>
             )}
@@ -219,7 +244,6 @@ const MetadataMatcher: React.FC<MetadataMatcherProps> = ({
                   </div>
 
                   <div className="flex flex-col justify-center text-[13px] text-gray-400 w-full overflow-hidden">
-
                     {/* Header & Inline Buttons */}
                     <div className="flex justify-between items-center mb-1 h-8">
                       <span className="font-bold text-lg text-white">

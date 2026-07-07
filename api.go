@@ -330,6 +330,58 @@ func (a *App) handleDeleteImage(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// POST /api/image/batch-delete
+func (a *App) handleBatchDeleteImages(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		sendJSONError(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		IDs []int64 `json:"ids"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		sendJSONError(w, "Invalid JSON body", http.StatusBadRequest)
+		return
+	}
+
+	if len(req.IDs) == 0 {
+		sendJSONError(w, "No IDs provided", http.StatusBadRequest)
+		return
+	}
+
+	galleryDir := "./Gallery/"
+	var failedIDs []int64
+
+	// Loop through and delete
+	for _, id := range req.IDs {
+		err := DeleteImageByID(a.DB, id, galleryDir)
+		if err != nil {
+			fmt.Printf("Failed to delete image %d: %v\n", id, err)
+			failedIDs = append(failedIDs, id)
+			// We continue to try deleting the rest even if one fails
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	if len(failedIDs) > 0 {
+		// Partial failure response
+		w.WriteHeader(http.StatusMultiStatus)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"message":  fmt.Sprintf("Deleted with some errors. %d failed.", len(failedIDs)),
+			"failures": failedIDs,
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"message": fmt.Sprintf("Successfully deleted %d images", len(req.IDs)),
+	})
+}
+
 func DownloadAndReplaceImage(url, destPath string) error {
 	resp, err := http.Get(url)
 	if err != nil {
@@ -406,7 +458,7 @@ func (a *App) handleImageUpdate(w http.ResponseWriter, r *http.Request) {
 	if params.ReplaceImage != nil && *params.ReplaceImage && params.MainData != nil {
 		targetURL := params.MainData.FileURL
 		if targetURL == "" {
-			targetURL := params.MainData.LargeFileURL // funny enough this is smaller than regular FileURL
+			targetURL = params.MainData.LargeFileURL // funny enough this is smaller than regular FileURL
 		}
 
 		if targetURL != "" {
@@ -419,8 +471,8 @@ func (a *App) handleImageUpdate(w http.ResponseWriter, r *http.Request) {
 				fmt.Printf("Successfully replaced physical file for: %s\n", filename)
 			}
 		} else {
+			// TODO: If the user tries to replace an image, but it does not let you we hit this
 			fmt.Println("Bro theres not target_url")
-
 		}
 	}
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { updateFavorite } from '../api/images';
 import DeleteImageButton from '../components/DeleteImageButton';
@@ -43,30 +43,31 @@ const ImagePage: React.FC = () => {
   const [imageData, setImageData] = useState<ImageData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showMatcher, setShowMatcher] = useState(false);
+
+  const fetchImage = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetch(`/api/image/${id}`);
+      if (!response.ok) {
+        if (response.status === 404) throw new Error('Image not found.');
+        throw new Error('Failed to load image data.');
+      }
+
+      const data: ImageData = await response.json();
+      setImageData(data);
+    } catch (err: any) {
+      setError(err.message || 'An unknown error occurred.');
+    } finally {
+      setLoading(false);
+    }
+  }, [id]);
 
   useEffect(() => {
-    const fetchImage = async () => {
-      setLoading(true);
-      setError(null);
-
-      try {
-        const response = await fetch(`/api/image/${id}`);
-        if (!response.ok) {
-          if (response.status === 404) throw new Error('Image not found.');
-          throw new Error('Failed to load image data.');
-        }
-
-        const data: ImageData = await response.json();
-        setImageData(data);
-      } catch (err: any) {
-        setError(err.message || 'An unknown error occurred.');
-      } finally {
-        setLoading(false);
-      }
-    };
-
     if (id) fetchImage();
-  }, [id]);
+  }, [id, fetchImage]);
 
   const formatBytes = (bytes: number) => {
     if (!bytes) return '0 Bytes';
@@ -127,8 +128,25 @@ const ImagePage: React.FC = () => {
 
     return (
       <MetadataMatcher
+        // TODO: fileSize={imageData.size}
         imageId={imageData.id}
         fileName={imageData.file_name}
+        onMatchSelected={fetchImage}
+      />
+    );
+  }
+
+  // --- Show Matcher for Higher Quality Overlay ---
+  if (showMatcher) {
+    return (
+      <MetadataMatcher
+        imageId={imageData.id}
+        fileName={imageData.file_name}
+        onClose={() => setShowMatcher(false)}
+        onMatchSelected={() => {
+          setShowMatcher(false);
+          fetchImage();
+        }}
       />
     );
   }
@@ -140,8 +158,6 @@ const ImagePage: React.FC = () => {
       <TopBar />
 
       <div className="flex flex-1 overflow-hidden">
-
-
         <aside className="w-72 bg-[#1c1c24] border-r border-[#2a2a35] overflow-y-auto p-4 flex-shrink-0 hide-scrollbar">
           {/* TOP CONTROLS: Favorite | Search Quality | Delete */}
           <div className="flex items-center justify-between mb-4 bg-[#15151a] p-2 rounded-lg border border-[#2a2a35]">
@@ -153,17 +169,16 @@ const ImagePage: React.FC = () => {
             </div>
 
             <div className="flex items-center gap-1">
-
-              {/* Link to Quality Matcher Page */}
-              <Link
-                to={`/image/${imageData.id}/quality`}
-                className="rounded-full p-1.5 text-gray-400 hover:text-[#60a5fa] hover:bg-[#2a2a35] transition-colors"
+              {/* Button to activate Quality Matcher UI */}
+              <button
+                onClick={() => setShowMatcher(true)}
+                className="rounded-full p-1.5 text-gray-400 hover:text-[#60a5fa] hover:bg-[#2a2a35] transition-colors cursor-pointer"
                 title="Search for Higher Quality"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7" />
                 </svg>
-              </Link>
+              </button>
 
               {/* Delete Button set to Icon mode */}
               <DeleteImageButton
@@ -179,7 +194,6 @@ const ImagePage: React.FC = () => {
           <TagCategory title="Character" tags={post.tags_character} colorClass="text-[#4ade80]" />
           <TagCategory title="General" tags={post.tags_general} colorClass="text-[#60a5fa]" />
           <TagCategory title="Meta" tags={post.tags_meta} colorClass="text-[#fb923c]" />
-
 
           <div className="mt-6 text-[13px]">
             <h3 className="font-bold text-gray-200 mb-2 text-base">Information</h3>

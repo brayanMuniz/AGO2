@@ -50,6 +50,7 @@ func main() {
 
 	http.HandleFunc("POST /api/process-gallery", app.handleProcessGallery)
 	http.HandleFunc("POST /api/album/export", app.handleExportAlbum)
+	http.HandleFunc("POST /api/image/batch-delete", app.handleBatchDeleteImages)
 
 	http.HandleFunc("PATCH /api/image/{id}", app.handleImageUpdate)
 
