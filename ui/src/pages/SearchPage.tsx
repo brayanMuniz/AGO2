@@ -81,7 +81,6 @@ function mergeSuggestions(...lists: TagSuggestion[][]): TagSuggestion[] {
   return Array.from(merged.values());
 }
 
-// Helpers for the new Appearance Filters
 const extractBrightness = (query: string): [number, number] | null => {
   const match = query.match(/(?:^|\s)brightness:(\d+)-(\d+)(?:\s|$)/);
   return match ? [parseInt(match[1], 10), parseInt(match[2], 10)] : null;
@@ -90,6 +89,60 @@ const extractBrightness = (query: string): [number, number] | null => {
 const extractColor = (query: string): string | null => {
   const match = query.match(/(?:^|\s)color:(#[0-9a-fA-F]{6})(?:\s|$)/);
   return match ? match[1] : null;
+};
+
+// Reusable Dual Slider Component styled to match your old UI perfectly
+const sliderClasses = `absolute w-full appearance-none bg-transparent pointer-events-none z-20 focus:outline-none 
+[&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:pointer-events-auto [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:bg-[#60a5fa] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer 
+[&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:pointer-events-auto [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:bg-[#60a5fa] [&::-moz-range-thumb]:border-none [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:cursor-pointer`;
+
+const RenderDualSlider = ({
+  label, min, max, currentMin, currentMax, step, formatValue, onChange
+}: {
+  label: string; min: number; max: number; currentMin: number; currentMax: number; step: number;
+  formatValue: (v: number) => string; onChange: (min: number, max: number) => void;
+}) => {
+  const isDefault = currentMin === min && currentMax === max;
+  const valueText = isDefault ? 'Any' : `${formatValue(currentMin)} - ${formatValue(currentMax)}`;
+
+  return (
+    <div className="mb-4">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide">{label}</span>
+        <div className="flex items-center gap-2">
+          {!isDefault && (
+            <button
+              onClick={() => onChange(min, max)}
+              className="text-xs text-red-400 hover:text-red-300 transition-colors"
+            >
+              Reset
+            </button>
+          )}
+          <span className="text-xs text-gray-500">{valueText}</span>
+        </div>
+      </div>
+      <div className="relative w-full h-1 mt-1 flex items-center">
+        <div className="absolute w-full h-1 bg-[#2a2a35] rounded-full"></div>
+        <div
+          className="absolute h-1 bg-[#60a5fa] rounded-full pointer-events-none"
+          style={{
+            left: `${((currentMin - min) / (max - min)) * 100}%`,
+            right: `${100 - ((currentMax - min) / (max - min)) * 100}%`
+          }}
+        ></div>
+        <input
+          type="range" min={min} max={max} step={step} value={currentMin}
+          onChange={(e) => onChange(Math.min(Number(e.target.value), currentMax - step), currentMax)}
+          className={sliderClasses}
+        />
+        <input
+          type="range" min={min} max={max} step={step} value={currentMax}
+          onChange={(e) => onChange(currentMin, Math.max(Number(e.target.value), currentMin + step))}
+          className={sliderClasses}
+        />
+      </div>
+    </div>
+  );
 };
 
 const SearchPage: React.FC = () => {
@@ -106,30 +159,27 @@ const SearchPage: React.FC = () => {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [selectionMode, setSelectionMode] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
-
-  // NEW: State to track deletion progress
   const [isDeleting, setIsDeleting] = useState(false);
 
-  // Track which category tag lists are expanded
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({});
 
-  // States for Sorting
   const [sortBy, setSortBy] = useState<'none' | 'created_at' | 'file_size' | 'dimensions'>('none');
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc');
 
-  // States for Appearance UI
   const [brightness, setBrightness] = useState<[number, number]>([0, 255]);
   const [color, setColor] = useState<string>('#000000');
   const [hasColor, setHasColor] = useState(false);
 
-  // Derived states for Status filters
+  const [widthRange, setWidthRange] = useState<[number, number]>([0, 10500]);
+  const [heightRange, setHeightRange] = useState<[number, number]>([0, 10500]);
+  const [sizeRange, setSizeRange] = useState<[number, number]>([0, 21]);
+
   const isMissing = /(?:^|\s)is:missing(?:\s|$)/.test(tagsQuery);
   const isDuplicate = /(?:^|\s)is:duplicate(?:\s|$)/.test(tagsQuery);
 
   useEffect(() => {
     setFilters(parseSearchQuery(tagsQuery));
 
-    // Sync Appearance UI with URL tags
     const b = extractBrightness(tagsQuery);
     setBrightness(b || [0, 255]);
 
@@ -140,6 +190,20 @@ const SearchPage: React.FC = () => {
     } else {
       setHasColor(false);
     }
+
+    const parseMinMax = (prefix: string, maxVal: number, divisor: number = 1): [number, number] => {
+      let min = 0;
+      let max = maxVal;
+      const minMatch = tagsQuery.match(new RegExp(`(?:^|\\s)${prefix}:>=(\\d+)(?:\\s|$)`));
+      if (minMatch) min = parseInt(minMatch[1], 10) / divisor;
+      const maxMatch = tagsQuery.match(new RegExp(`(?:^|\\s)${prefix}:<=(\\d+)(?:\\s|$)`));
+      if (maxMatch) max = parseInt(maxMatch[1], 10) / divisor;
+      return [min, max];
+    };
+
+    setWidthRange(parseMinMax('width', 10500));
+    setHeightRange(parseMinMax('height', 10500));
+    setSizeRange(parseMinMax('size', 21, 1024 * 1024));
   }, [tagsQuery]);
 
   useEffect(() => {
@@ -222,7 +286,6 @@ const SearchPage: React.FC = () => {
     debounceRef.current = window.setTimeout(updateUrl, 350);
   };
 
-  // Dedicated URL updater for Appearance tags (Color & Brightness) and Status flags
   const updateSpecialFilter = (prefix: string, newValue: string | null) => {
     let tokens = tagsQuery.split(/\s+/).filter(Boolean);
     tokens = tokens.filter((t) => !t.startsWith(prefix));
@@ -231,6 +294,20 @@ const SearchPage: React.FC = () => {
 
     const newQuery = tokens.join(' ');
 
+    if (debounceRef.current) window.clearTimeout(debounceRef.current);
+    debounceRef.current = window.setTimeout(() => {
+      setSearchParams(newQuery ? { tags: newQuery } : {});
+    }, 350);
+  };
+
+  const updateRangeFilter = (prefix: string, min: number, max: number, anyThreshold: number, multiplier = 1) => {
+    let tokens = tagsQuery.split(/\s+/).filter(Boolean);
+    tokens = tokens.filter((t) => !t.startsWith(`${prefix}:>=`) && !t.startsWith(`${prefix}:<=`));
+
+    if (min > 0) tokens.push(`${prefix}:>=${Math.floor(min * multiplier)}`);
+    if (max < anyThreshold) tokens.push(`${prefix}:<=${Math.floor(max * multiplier)}`);
+
+    const newQuery = tokens.join(' ');
     if (debounceRef.current) window.clearTimeout(debounceRef.current);
     debounceRef.current = window.setTimeout(() => {
       setSearchParams(newQuery ? { tags: newQuery } : {});
@@ -246,15 +323,6 @@ const SearchPage: React.FC = () => {
   const handleClearColor = () => {
     setHasColor(false);
     updateSpecialFilter('color:', null);
-  };
-
-  const handleBrightnessChange = (min: number, max: number) => {
-    setBrightness([min, max]);
-    if (min === 0 && max === 255) {
-      updateSpecialFilter('brightness:', null);
-    } else {
-      updateSpecialFilter('brightness:', `brightness:${min}-${max}`);
-    }
   };
 
   const handleAddTag = (category: TagCategory, name: string) => {
@@ -328,7 +396,6 @@ const SearchPage: React.FC = () => {
     }));
   };
 
-  // --- NEW: Batch Delete Handler ---
   const handleBatchDelete = async () => {
     const idsToDelete = Array.from(selectedIds);
     if (idsToDelete.length === 0) return;
@@ -350,19 +417,16 @@ const SearchPage: React.FC = () => {
         throw new Error(errorData.message || 'Failed to delete images.');
       }
 
-      // Optimistically remove deleted items from UI
       setImages((prev) => prev.filter((img) => !selectedIds.has(img.id)));
       setSelectedIds(new Set());
       setSelectionMode(false);
     } catch (err: any) {
       alert(err.message || 'An error occurred during deletion.');
-      // Optionally trigger a fresh fetch here to sync actual state
     } finally {
       setIsDeleting(false);
     }
   };
 
-  // Sort Images
   const sortedImages = useMemo(() => {
     if (sortBy === 'none') {
       return images;
@@ -445,7 +509,7 @@ const SearchPage: React.FC = () => {
 
       <div className="flex flex-1 overflow-hidden">
         <aside className="w-72 bg-[#1c1c24] border-r border-[#2a2a35] flex flex-col flex-shrink-0">
-          <div className="p-4 border-b border-[#2a2a35]">
+          <div className="p-4 border-b border-[#2a2a35] overflow-y-auto hide-scrollbar">
             <h2 className="font-bold text-gray-200 mb-2 text-sm">Search</h2>
             <SearchAutocomplete
               draftInput={draftInput}
@@ -460,30 +524,60 @@ const SearchPage: React.FC = () => {
               onSliderChange={(next) => applyFilters(next, false)}
             />
 
+            {/* --- FILE PROPERTIES --- */}
+            <div className="mt-4 pt-4 border-t border-[#2a2a35]">
+
+              <RenderDualSlider
+                label="Width"
+                min={0} max={10500} step={100}
+                currentMin={widthRange[0]} currentMax={widthRange[1]}
+                formatValue={(v) => (v >= 10500 ? 'Any' : `${v}px`)}
+                onChange={(min, max) => {
+                  setWidthRange([min, max]);
+                  updateRangeFilter('width', min, max, 10500);
+                }}
+              />
+
+              <RenderDualSlider
+                label="Height"
+                min={0} max={10500} step={100}
+                currentMin={heightRange[0]} currentMax={heightRange[1]}
+                formatValue={(v) => (v >= 10500 ? 'Any' : `${v}px`)}
+                onChange={(min, max) => {
+                  setHeightRange([min, max]);
+                  updateRangeFilter('height', min, max, 10500);
+                }}
+              />
+
+              <RenderDualSlider
+                label="File Size"
+                min={0} max={21} step={1}
+                currentMin={sizeRange[0]} currentMax={sizeRange[1]}
+                formatValue={(v) => (v >= 21 ? 'Any' : `${v}MB`)}
+                onChange={(min, max) => {
+                  setSizeRange([min, max]);
+                  updateRangeFilter('size', min, max, 21, 1024 * 1024);
+                }}
+              />
+            </div>
+
             {/* --- APPEARANCE FILTERS --- */}
             <div className="mt-4 pt-4 border-t border-[#2a2a35]">
-              <h3 className="font-bold text-gray-200 mb-3 text-xs uppercase tracking-wider">Appearance</h3>
 
-              {/* Color Palette */}
-              <div className="mb-5">
+              <div className="mb-4">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm text-gray-400">Color Palette</span>
+                  <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Color Palette</span>
                   {hasColor && (
-                    <button
-                      onClick={handleClearColor}
-                      className="text-xs text-red-400 hover:text-red-300 transition-colors"
-                    >
+                    <button onClick={handleClearColor} className="text-xs text-red-400 hover:text-red-300 transition-colors">
                       Clear
                     </button>
                   )}
                 </div>
                 <div className="flex items-center gap-3">
                   <input
-                    type="color"
-                    value={hasColor ? color : '#000000'}
+                    type="color" value={hasColor ? color : '#000000'}
                     onChange={(e) => handleColorChange(e.target.value)}
-                    className="w-8 h-8 rounded cursor-pointer bg-transparent border-0 p-0"
-                    title="Pick a color"
+                    className="w-8 h-8 rounded cursor-pointer bg-transparent border-0 p-0" title="Pick a color"
                   />
                   <span className="text-xs text-gray-500 font-mono">
                     {hasColor ? color.toUpperCase() : 'None selected'}
@@ -491,71 +585,25 @@ const SearchPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* Dual-Thumb Brightness Slider */}
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-sm text-gray-400">Brightness</span>
-                  {(brightness[0] > 0 || brightness[1] < 255) && (
-                    <button
-                      onClick={() => handleBrightnessChange(0, 255)}
-                      className="text-xs text-red-400 hover:text-red-300 transition-colors"
-                    >
-                      Reset
-                    </button>
-                  )}
-                </div>
-
-                <div className="relative w-full h-1 mt-2 mb-4 flex items-center">
-                  {/* Track Background */}
-                  <div className="absolute w-full h-1 bg-[#2a2a35] rounded-full"></div>
-
-                  {/* Active Track */}
-                  <div
-                    className="absolute h-1 bg-[#60a5fa] rounded-full pointer-events-none"
-                    style={{
-                      left: `${(brightness[0] / 255) * 100}%`,
-                      right: `${100 - (brightness[1] / 255) * 100}%`
-                    }}
-                  ></div>
-
-                  {/* Min Input */}
-                  <input
-                    type="range" min="0" max="255"
-                    value={brightness[0]}
-                    onChange={(e) => {
-                      const val = Math.min(parseInt(e.target.value), brightness[1] - 1);
-                      handleBrightnessChange(val, brightness[1]);
-                    }}
-                    className="absolute w-full appearance-none bg-transparent pointer-events-none z-20 focus:outline-none
-                               [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:pointer-events-auto [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:bg-[#60a5fa] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer 
-                               [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:pointer-events-auto [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:bg-[#60a5fa] [&::-moz-range-thumb]:border-none [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:cursor-pointer"
-                  />
-
-                  {/* Max Input */}
-                  <input
-                    type="range" min="0" max="255"
-                    value={brightness[1]}
-                    onChange={(e) => {
-                      const val = Math.max(parseInt(e.target.value), brightness[0] + 1);
-                      handleBrightnessChange(brightness[0], val);
-                    }}
-                    className="absolute w-full appearance-none bg-transparent pointer-events-none z-20 focus:outline-none
-                               [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:pointer-events-auto [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:bg-[#60a5fa] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer 
-                               [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:pointer-events-auto [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:bg-[#60a5fa] [&::-moz-range-thumb]:border-none [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:cursor-pointer"
-                  />
-                </div>
-
-                {/* Value display */}
-                <div className="flex justify-between text-xs text-gray-500 font-mono">
-                  <span>{brightness[0]}</span>
-                  <span>{brightness[1]}</span>
-                </div>
-              </div>
+              <RenderDualSlider
+                label="Brightness"
+                min={0} max={255} step={1}
+                currentMin={brightness[0]} currentMax={brightness[1]}
+                formatValue={(v) => `${v}`}
+                onChange={(min, max) => {
+                  setBrightness([min, max]);
+                  if (min === 0 && max === 255) {
+                    updateSpecialFilter('brightness:', null);
+                  } else {
+                    updateSpecialFilter('brightness:', `brightness:${min}-${max}`);
+                  }
+                }}
+              />
             </div>
 
-            {/* --- NEW STATUS FILTERS --- */}
+            {/* --- STATUS FILTERS --- */}
             <div className="mt-4 pt-4 border-t border-[#2a2a35]">
-              <h3 className="font-bold text-gray-200 mb-3 text-xs uppercase tracking-wider">Status</h3>
+              <h3 className="font-bold text-gray-400 mb-3 text-xs uppercase tracking-wider">Status</h3>
               <div className="flex gap-2">
                 <button
                   onClick={() => updateSpecialFilter('is:missing', isMissing ? null : 'is:missing')}
@@ -577,11 +625,10 @@ const SearchPage: React.FC = () => {
                 </button>
               </div>
             </div>
-            {/* --- END NEW STATUS FILTERS --- */}
 
           </div>
 
-          <div className="flex-1 overflow-y-auto p-4 hide-scrollbar">
+          <div className="flex-1 overflow-y-auto p-4 border-t border-[#2a2a35] hide-scrollbar">
             <h2 className="font-bold text-gray-200 mb-2 text-sm">Tags</h2>
             {images.length === 0 && !loading && (
               <p className="text-sm text-gray-500">No tags to display.</p>
@@ -594,8 +641,6 @@ const SearchPage: React.FC = () => {
 
         <main className="flex-1 flex flex-col overflow-hidden">
           <div className="h-12 border-b border-[#2a2a35] flex items-center px-4 shrink-0 gap-4 text-xs">
-
-            {/* SORTING CONTROLS */}
             <div className="flex items-center gap-2 pr-4 border-r border-[#2a2a35]">
               <span className="text-gray-500 font-medium">Sort by:</span>
               <select
@@ -668,7 +713,6 @@ const SearchPage: React.FC = () => {
                     Export ({selectedImageIds.length})
                   </button>
 
-                  {/* --- NEW: Batch Delete Button --- */}
                   <button
                     type="button"
                     onClick={handleBatchDelete}
@@ -702,10 +746,7 @@ const SearchPage: React.FC = () => {
                         onClick={(event) => {
                           if (selectionMode) {
                             event.preventDefault();
-                            // Prevent selection clicks while a batch delete is happening
-                            if (!isDeleting) {
-                              toggleSelected(img.id);
-                            }
+                            if (!isDeleting) toggleSelected(img.id);
                           }
                         }}
                         className={`block relative rounded transition-all duration-200 ${selectionMode && isSelected
@@ -723,7 +764,6 @@ const SearchPage: React.FC = () => {
                           />
                         </div>
 
-                        {/* Read-only visual checkbox indicator for selection mode */}
                         {selectionMode && (
                           <div className="absolute top-2 left-2 z-10 pointer-events-none bg-black/40 rounded-sm">
                             <input
