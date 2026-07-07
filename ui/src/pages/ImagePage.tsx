@@ -128,7 +128,6 @@ const ImagePage: React.FC = () => {
 
     return (
       <MetadataMatcher
-        // TODO: fileSize={imageData.size}
         imageId={imageData.id}
         fileName={imageData.file_name}
         onMatchSelected={fetchImage}
@@ -169,7 +168,6 @@ const ImagePage: React.FC = () => {
             </div>
 
             <div className="flex items-center gap-1">
-              {/* Button to activate Quality Matcher UI */}
               <button
                 onClick={() => setShowMatcher(true)}
                 className="rounded-full p-1.5 text-gray-400 hover:text-[#60a5fa] hover:bg-[#2a2a35] transition-colors cursor-pointer"
@@ -180,7 +178,6 @@ const ImagePage: React.FC = () => {
                 </svg>
               </button>
 
-              {/* Delete Button set to Icon mode */}
               <DeleteImageButton
                 imageId={imageData.id}
                 redirectTo="/"
@@ -208,19 +205,22 @@ const ImagePage: React.FC = () => {
                   {post.image_width}x{post.image_height})
                 </span>
               </p>
-              {post.source && (
+
+              {/* --- NEW: Link to Danbooru using post.id --- */}
+              {post.id && (
                 <p className="truncate">
                   Source:{' '}
                   <a
-                    href={post.source}
+                    href={`https://danbooru.donmai.us/posts/${post.id}`}
                     target="_blank"
                     rel="noreferrer"
                     className="text-[#60a5fa] hover:underline"
                   >
-                    {post.source}
+                    Danbooru ↗
                   </a>
                 </p>
               )}
+
               <p>
                 Rating: <span className="text-gray-400 capitalize">{post.rating}</span>
               </p>
