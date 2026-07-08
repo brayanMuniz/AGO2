@@ -423,11 +423,14 @@ func GetImageByID(db *sql.DB, fileID int64, includeMatches bool) (*Image, error)
 		post.ImageWidth = int(imgWidth.Int64)
 		post.FileSize = int(fileSize.Int64)
 
-		if activeMetadataID.Valid && recordID == activeMetadataID.Int64 {
+		if (activeMetadataID.Valid && recordID == activeMetadataID.Int64) || includeMatches {
 			err = populateTags(db, recordID, &post)
 			if err != nil {
-				return nil, fmt.Errorf("failed to populate tags for active record: %w", err)
+				return nil, fmt.Errorf("failed to populate tags for record: %w", err)
 			}
+		}
+
+		if activeMetadataID.Valid && recordID == activeMetadataID.Int64 {
 			mainPost := post
 			img.MainData = &mainPost
 		}

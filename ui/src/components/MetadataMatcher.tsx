@@ -9,7 +9,14 @@ interface Post {
   image_height: number;
   image_width: number;
   file_size: number;
+  file_url?: string;
+  large_file_url?: string;
   preview_file_url?: string;
+  tags_artist?: string[];
+  tags_character?: string[];
+  tags_copyright?: string[];
+  tags_general?: string[];
+  tags_meta?: string[];
 }
 
 interface MatchRecord {
@@ -183,7 +190,7 @@ const MetadataMatcher: React.FC<MetadataMatcherProps> = ({
         </div>
 
         {/* RIGHT PANEL */}
-        <div className="w-[450px] flex flex-col shrink-0 bg-[#1c1c24] border border-[#2a2a35] rounded-xl overflow-hidden h-full">
+        <div className="w-[500px] flex flex-col shrink-0 bg-[#1c1c24] border border-[#2a2a35] rounded-xl overflow-hidden h-full">
           <div className="p-4 border-b border-[#2a2a35] flex items-center justify-between bg-[#15151a] shrink-0">
             <div className="flex flex-col gap-1 w-2/3">
               <label className="text-sm font-semibold text-gray-200 flex justify-between">
@@ -225,83 +232,125 @@ const MetadataMatcher: React.FC<MetadataMatcherProps> = ({
             ) : filteredAndSortedMatches.length === 0 ? (
               <div className="text-center text-gray-500 mt-10">No matches found above {minScore}%.</div>
             ) : (
-              filteredAndSortedMatches.map((match) => (
-                <div
-                  key={match.post_id}
-                  className="flex gap-4 p-3 bg-[#111115] border border-[#2a2a35] hover:border-[#60a5fa] rounded-lg transition-colors group"
-                >
-                  {/* Thumbnail */}
-                  <div className="w-24 h-24 shrink-0 bg-[#1c1c24] border border-[#2a2a35] rounded overflow-hidden flex items-center justify-center text-gray-600 text-xs">
-                    {match.post.preview_file_url ? (
-                      <img
-                        src={`/api/proxy-image?url=${encodeURIComponent(match.post.preview_file_url)}`}
-                        alt={`Thumbnail for ${match.post_id}`}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <span>ID: {match.post_id}</span>
-                    )}
-                  </div>
+              filteredAndSortedMatches.map((match) => {
+                const canReplace = Boolean(match.post.file_url || match.post.large_file_url);
+                const currentArea = currentWidth * currentHeight;
+                const matchArea = match.post.image_width * match.post.image_height;
 
-                  <div className="flex flex-col justify-center text-[13px] text-gray-400 w-full overflow-hidden">
-                    {/* Header & Inline Buttons */}
-                    <div className="flex justify-between items-center mb-1 h-8">
-                      <span className="font-bold text-lg text-white">
-                        <span className={match.score > 90 ? 'text-green-400' : match.score > 70 ? 'text-[#60a5fa]' : 'text-yellow-400'}>
-                          {match.score.toFixed(1)}%
-                        </span> Match
-                      </span>
+                const isExactMatch =
+                  currentWidth > 0 &&
+                  currentHeight > 0 &&
+                  match.post.image_width === currentWidth &&
+                  match.post.image_height === currentHeight &&
+                  (fileSize === undefined || match.post.file_size === fileSize);
 
-                      {confirmMatchId === match.post_id ? (
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-[#60a5fa] font-semibold">
-                            {confirmAction === 'replace' ? 'Replace file?' : 'Match data?'}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={handleConfirmMatch}
-                            disabled={updating}
-                            className="px-2 py-0.5 text-xs rounded bg-[#60a5fa] hover:bg-[#3b82f6] text-white disabled:opacity-50 cursor-pointer transition-colors"
-                          >
-                            {updating ? '...' : 'Yes'}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setConfirmMatchId(null);
-                              setConfirmAction(null);
-                            }}
-                            disabled={updating}
-                            className="px-2 py-0.5 text-xs rounded bg-[#2a2a35] hover:bg-[#3a3a45] text-gray-300 cursor-pointer transition-colors"
-                          >
-                            No
-                          </button>
-                        </div>
+                const isHigherRes = !isExactMatch && currentArea > 0 && matchArea > currentArea;
+                const isLowerRes = !isExactMatch && currentArea > 0 && matchArea < currentArea;
+
+                return (
+                  <div
+                    key={match.post_id}
+                    className={`flex gap-4 p-3 bg-[#111115] border rounded-lg transition-all group ${
+                      isExactMatch
+                        ? 'border-[#60a5fa]/80 shadow-[0_0_15px_rgba(96,165,250,0.12)]'
+                        : 'border-[#2a2a35] hover:border-[#60a5fa]'
+                    }`}
+                  >
+                    {/* Thumbnail */}
+                    <div className="w-24 h-24 shrink-0 bg-[#1c1c24] border border-[#2a2a35] rounded overflow-hidden flex items-center justify-center text-gray-600 text-xs">
+                      {match.post.preview_file_url ? (
+                        <img
+                          src={`/api/proxy-image?url=${encodeURIComponent(match.post.preview_file_url)}`}
+                          alt={`Thumbnail for ${match.post_id}`}
+                          className="w-full h-full object-cover"
+                        />
                       ) : (
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setConfirmMatchId(match.post_id);
-                              setConfirmAction('match');
-                            }}
-                            className="px-3 py-1.5 bg-[#2a2a35] hover:bg-[#60a5fa] hover:text-white text-gray-300 rounded-md text-xs font-semibold transition-colors border border-transparent hover:border-[#3b82f6] cursor-pointer"
-                          >
-                            Match
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setConfirmMatchId(match.post_id);
-                              setConfirmAction('replace');
-                            }}
-                            className="px-3 py-1.5 bg-[#2a2a35] hover:text-white text-gray-300 rounded-md text-xs font-semibold transition-colors border border-transparent hover:border-red-400 hover:bg-red-500/20 cursor-pointer"
-                          >
-                            Replace
-                          </button>
-                        </div>
+                        <span>ID: {match.post_id}</span>
                       )}
                     </div>
+
+                    <div className="flex flex-col justify-center text-[13px] text-gray-400 w-full overflow-hidden">
+                      {/* Header & Inline Buttons */}
+                      <div className="flex justify-between items-center mb-1 h-8">
+                        <span className="font-bold text-lg text-white">
+                          <span className={match.score > 90 ? 'text-green-400' : match.score > 70 ? 'text-[#60a5fa]' : 'text-yellow-400'}>
+                            {match.score.toFixed(1)}%
+                          </span> Match
+                        </span>
+
+                        {confirmMatchId === match.post_id ? (
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-[#60a5fa] font-semibold">
+                              {confirmAction === 'replace' ? 'Replace file?' : 'Match data?'}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={handleConfirmMatch}
+                              disabled={updating}
+                              className="px-2 py-0.5 text-xs rounded bg-[#60a5fa] hover:bg-[#3b82f6] text-white disabled:opacity-50 cursor-pointer transition-colors"
+                            >
+                              {updating ? '...' : 'Yes'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setConfirmMatchId(null);
+                                setConfirmAction(null);
+                              }}
+                              disabled={updating}
+                              className="px-2 py-0.5 text-xs rounded bg-[#2a2a35] hover:bg-[#3a3a45] text-gray-300 cursor-pointer transition-colors"
+                            >
+                              No
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setConfirmMatchId(match.post_id);
+                                setConfirmAction('match');
+                              }}
+                              className="px-3 py-1.5 bg-[#2a2a35] hover:bg-[#60a5fa] hover:text-white text-gray-300 rounded-md text-xs font-semibold transition-colors border border-transparent hover:border-[#3b82f6] cursor-pointer"
+                            >
+                              Match
+                            </button>
+                            <button
+                              type="button"
+                              disabled={!canReplace}
+                              title={
+                                !canReplace
+                                  ? 'Danbooru file unavailable (taken down / deleted)'
+                                  : isExactMatch
+                                  ? 'Exact dimensions and file size match'
+                                  : isHigherRes
+                                  ? 'Higher resolution available – click to replace!'
+                                  : isLowerRes
+                                  ? 'Lower resolution match'
+                                  : 'Replace file'
+                              }
+                              onClick={() => {
+                                if (!canReplace) return;
+                                setConfirmMatchId(match.post_id);
+                                setConfirmAction('replace');
+                              }}
+                              className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors border ${
+                                !canReplace
+                                  ? 'opacity-35 cursor-not-allowed bg-[#1c1c24] text-gray-500 border-transparent'
+                                  : isExactMatch
+                                  ? 'bg-[#60a5fa]/15 text-[#60a5fa] border-[#60a5fa] hover:bg-[#60a5fa] hover:text-white cursor-pointer'
+                                  : isHigherRes
+                                  ? 'bg-green-500/15 text-green-400 border-green-500 hover:bg-green-500 hover:text-white cursor-pointer'
+                                  : isLowerRes
+                                  ? 'bg-red-500/15 text-red-400 border-red-500 hover:bg-red-500 hover:text-white cursor-pointer'
+                                  : 'bg-[#2a2a35] hover:text-white text-gray-300 border-transparent hover:border-red-400 hover:bg-red-500/20 cursor-pointer'
+                              }`}
+                            >
+                              Replace
+                            </button>
+                          </div>
+                        )}
+                      </div>
 
                     <div className="grid grid-cols-[80px_1fr] gap-x-2 gap-y-1 mt-1 truncate">
                       <span className="text-gray-500">Source:</span>
@@ -322,9 +371,64 @@ const MetadataMatcher: React.FC<MetadataMatcherProps> = ({
                       <span className="text-gray-500">Size:</span>
                       <span className="text-gray-300">{formatBytes(match.post.file_size)}</span>
                     </div>
+
+                    {/* Bottom tag pills for fast recognition */}
+                    <div className="mt-2.5 pt-2 border-t border-[#2a2a35]/60 flex flex-wrap gap-1.5 items-center">
+                      {((match.post.tags_character && match.post.tags_character.length > 0) ||
+                        (match.post.tags_copyright && match.post.tags_copyright.length > 0) ||
+                        (match.post.tags_artist && match.post.tags_artist.length > 0)) ? (
+                        <>
+                          {match.post.tags_character?.map((tag) => (
+                            <span
+                              key={`char-${tag}`}
+                              className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-[#4ade80]/15 text-[#4ade80] border border-[#4ade80]/30"
+                              title="Character"
+                            >
+                              {tag.replace(/_/g, ' ')}
+                            </span>
+                          ))}
+                          {match.post.tags_copyright?.map((tag) => (
+                            <span
+                              key={`copy-${tag}`}
+                              className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-[#c084fc]/15 text-[#c084fc] border border-[#c084fc]/30"
+                              title="Series / Copyright"
+                            >
+                              {tag.replace(/_/g, ' ')}
+                            </span>
+                          ))}
+                          {match.post.tags_artist?.map((tag) => (
+                            <span
+                              key={`art-${tag}`}
+                              className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-[#fca5a5]/15 text-[#fca5a5] border border-[#fca5a5]/30"
+                              title="Artist"
+                            >
+                              {tag.replace(/_/g, ' ')}
+                            </span>
+                          ))}
+                        </>
+                      ) : (match.post.tags_general && match.post.tags_general.length > 0) ? (
+                        <>
+                          <span className="text-[11px] text-gray-500 italic mr-0.5">General:</span>
+                          {match.post.tags_general.slice(0, 6).map((tag) => (
+                            <span
+                              key={`gen-${tag}`}
+                              className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-[#60a5fa]/15 text-[#60a5fa] border border-[#60a5fa]/30"
+                              title="General Tag"
+                            >
+                              {tag.replace(/_/g, ' ')}
+                            </span>
+                          ))}
+                        </>
+                      ) : (
+                        <span className="text-xs text-gray-500 italic">
+                          No character/series tag data available
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
-              ))
+              );
+            })
             )}
           </div>
         </div>

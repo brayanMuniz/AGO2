@@ -22,18 +22,18 @@ type IQDBMatch struct {
 }
 
 // MarshalJSON customizes the JSON output to hide specific fields from the frontend response
-func (p *Post) MarshalJSON() ([]byte, error) {
+func (p Post) MarshalJSON() ([]byte, error) {
 	type Alias Post
 
 	return json.Marshal(&struct {
-		*Alias
+		Alias
 		RawTagStringArtist    string `json:"tag_string_artist,omitempty"`
 		RawTagStringCharacter string `json:"tag_string_character,omitempty"`
 		RawTagStringCopyright string `json:"tag_string_copyright,omitempty"`
 		RawTagStringGeneral   string `json:"tag_string_general,omitempty"`
 		RawTagStringMeta      string `json:"tag_string_meta,omitempty"`
 	}{
-		Alias:                 (*Alias)(p),
+		Alias:                 (Alias)(p),
 		RawTagStringArtist:    "",
 		RawTagStringCharacter: "",
 		RawTagStringCopyright: "",
@@ -93,12 +93,26 @@ type Post struct {
 	RawTagStringMeta      string `json:"tag_string_meta"`
 }
 
+func splitTags(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return []string{}
+	}
+	return strings.Fields(raw)
+}
+
 func (p *Post) SplitRawStrings() {
-	p.TagsArtist = strings.Split(p.RawTagStringArtist, " ")
-	p.TagsCharacters = strings.Split(p.RawTagStringCharacter, " ")
-	p.TagsCopyright = strings.Split(p.RawTagStringCopyright, " ")
-	p.TagsGeneral = strings.Split(p.RawTagStringGeneral, " ")
-	p.TagsMeta = strings.Split(p.RawTagStringMeta, " ")
+	p.TagsArtist = splitTags(p.RawTagStringArtist)
+	p.TagsCharacters = splitTags(p.RawTagStringCharacter)
+	p.TagsCopyright = splitTags(p.RawTagStringCopyright)
+	p.TagsGeneral = splitTags(p.RawTagStringGeneral)
+	p.TagsMeta = splitTags(p.RawTagStringMeta)
+
+	p.TagCountArtist = len(p.TagsArtist)
+	p.TagCountCharacter = len(p.TagsCharacters)
+	p.TagCountCopyright = len(p.TagsCopyright)
+	p.TagCountGeneral = len(p.TagsGeneral)
+	p.TagCountMeta = len(p.TagsMeta)
+	p.TagCount = p.TagCountArtist + p.TagCountCharacter + p.TagCountCopyright + p.TagCountGeneral + p.TagCountMeta
 }
 
 func iqdb_upload_request(apiKey, userName, fileLocation string) (IQDBResponse, error) {
