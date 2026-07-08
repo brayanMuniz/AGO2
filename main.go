@@ -16,9 +16,19 @@ func main() {
 	}
 	defer database.Close()
 
+	// Helper to prevent aggressive browser caching on replaced images and thumbnails
+	noCacheHandler := func(h http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+			w.Header().Set("Pragma", "no-cache")
+			w.Header().Set("Expires", "0")
+			h.ServeHTTP(w, r)
+		})
+	}
+
 	// reroute images for frontend
-	http.Handle("/images/", http.StripPrefix("/images/", http.FileServer(http.Dir("./Gallery"))))
-	http.Handle("/thumbnails/", http.StripPrefix("/thumbnails/", http.FileServer(http.Dir("./thumbnails"))))
+	http.Handle("/images/", noCacheHandler(http.StripPrefix("/images/", http.FileServer(http.Dir("./Gallery")))))
+	http.Handle("/thumbnails/", noCacheHandler(http.StripPrefix("/thumbnails/", http.FileServer(http.Dir("./thumbnails")))))
 
 	err = godotenv.Load("./.env")
 	if err != nil {

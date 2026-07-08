@@ -756,7 +756,7 @@ const SearchPage: React.FC = () => {
                       >
                         <div className={`bg-[#111115] p-1 rounded ${selectionMode && isSelected ? 'opacity-80' : ''}`}>
                           <img
-                            src={img.thumbnail_path ? img.thumbnail_path : `/images/${img.file_name}`}
+                            src={`${img.thumbnail_path ? img.thumbnail_path : `/images/${img.file_name}`}?v=${img.file_size || ''}`}
                             alt={`Post ${img.id}`}
                             className="object-contain"
                             style={{ maxWidth: '250px', maxHeight: '250px' }}

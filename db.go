@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"fmt"
+	"image"
 	"io"
 	"log"
 	"os"
@@ -50,6 +51,9 @@ func createTables(db *sql.DB) error {
 		hasDuplicate INTEGER DEFAULT NULL,
 		isFavorite BOOLEAN DEFAULT FALSE,
 		thumbnail_path TEXT DEFAULT NULL,
+		image_height INTEGER DEFAULT 0,
+		image_width INTEGER DEFAULT 0,
+		file_size INTEGER DEFAULT 0,
 		
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		FOREIGN KEY (active_metadata_id) REFERENCES metadata_records (id) ON DELETE SET NULL,
@@ -71,9 +75,6 @@ func createTables(db *sql.DB) error {
 		large_file_url TEXT,
 		rating TEXT,
 		source TEXT,
-		image_height INTEGER,
-		image_width INTEGER,
-		file_size INTEGER,
 		
 		FOREIGN KEY (filename) REFERENCES files (filename) ON DELETE CASCADE ON UPDATE CASCADE
 	);
@@ -118,6 +119,55 @@ type ProcessedImage struct {
 	Skipped   bool
 }
 
+// GetFileDimensionsAndSize inspects a physical image file to return width, height, and size.
+func GetFileDimensionsAndSize(filePath string) (width int, height int, size int64) {
+	fileInfo, err := os.Stat(filePath)
+	if err == nil {
+		size = fileInfo.Size()
+	}
+	f, err := os.Open(filePath)
+	if err != nil {
+		return 0, 0, size
+	}
+	defer f.Close()
+
+	cfg, _, err := image.DecodeConfig(f)
+	if err == nil {
+		width = cfg.Width
+		height = cfg.Height
+	}
+	return width, height, size
+}
+
+// UpdateFileDimensionsInDB updates the physical file dimensions, size, hash, and colors stored in the files table.
+func UpdateFileDimensionsInDB(db *sql.DB, filename string, filePath string) error {
+	w, h, sz := GetFileDimensionsAndSize(filePath)
+	hash, err := GetPixelHash(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to hash updated file: %w", err)
+	}
+
+	_, err = db.Exec("UPDATE files SET hash = ?, image_width = ?, image_height = ?, file_size = ? WHERE filename = ?", hash, w, h, sz, filename)
+	if err != nil {
+		return err
+	}
+
+	var fileID int64
+	err = db.QueryRow("SELECT id FROM files WHERE filename = ?", filename).Scan(&fileID)
+	if err == nil && fileID > 0 {
+		palette, _ := ExtractColorPalette(filePath, 5)
+		db.Exec("DELETE FROM image_colors WHERE file_id = ?", fileID)
+		for _, color := range palette {
+			db.Exec("INSERT INTO image_colors (file_id, r, g, b, hex) VALUES (?, ?, ?, ?, ?)",
+				fileID, color.R, color.G, color.B, color.Hex)
+		}
+	}
+
+	// Regenerate thumbnail so UI displays the replaced image
+	GenerateThumbnail(filePath, "thumbnails")
+	return nil
+}
+
 // OPTIMIZE: If in the future this is too slow use a transaction instead
 func ProcessNewImageUpload(db *sql.DB, apiKey, userName, filename, filePath string) (ProcessedImage, error) {
 	result := ProcessedImage{AutoMatch: false, Skipped: false}
@@ -127,13 +177,45 @@ func ProcessNewImageUpload(db *sql.DB, apiKey, userName, filename, filePath stri
 		return result, fmt.Errorf("failed to hash image: %w", err)
 	}
 
+	imgWidth, imgHeight, fileSize := GetFileDimensionsAndSize(filePath)
+
 	palette, err := ExtractColorPalette(filePath, 5) // Get top 5 colors
 	if err != nil {
 		fmt.Printf("Warning: failed to extract color palette for %s: %v\n", filename, err)
 		palette = []Color{} // Default to empty array on failure
 	}
 
-	// Checks for an existing original file
+	// First check if a file with this exact filename already exists in the database
+	var existingFileID int64
+	var existingFileHash string
+	err = db.QueryRow("SELECT id, hash FROM files WHERE filename = ?", filename).Scan(&existingFileID, &existingFileHash)
+	if err == nil {
+		if existingFileHash == hash {
+			// Filename and hash match. Already processed.
+			fmt.Printf("Skipped: %s is already processed.\n", filename)
+			result.Skipped = true
+			return result, nil
+		}
+
+		// Filename exists but file was modified/replaced on disk with a new version.
+		fmt.Printf("Updating modified file record for: %s\n", filename)
+		_, err = db.Exec("UPDATE files SET hash = ?, image_width = ?, image_height = ?, file_size = ? WHERE id = ?",
+			hash, imgWidth, imgHeight, fileSize, existingFileID)
+		if err != nil {
+			return result, fmt.Errorf("failed to update modified file record: %w", err)
+		}
+
+		db.Exec("DELETE FROM image_colors WHERE file_id = ?", existingFileID)
+		for _, color := range palette {
+			db.Exec("INSERT INTO image_colors (file_id, r, g, b, hex) VALUES (?, ?, ?, ?, ?)",
+				existingFileID, color.R, color.G, color.B, color.Hex)
+		}
+
+		result.Skipped = true
+		return result, nil
+	}
+
+	// Checks for an existing original file with the same pixel hash
 	var existingID int64
 	var existingFilename string
 	err = db.QueryRow("SELECT id, filename FROM files WHERE hash = ? AND hasDuplicate IS NULL", hash).Scan(&existingID, &existingFilename)
@@ -148,7 +230,7 @@ func ProcessNewImageUpload(db *sql.DB, apiKey, userName, filename, filePath stri
 
 		// Same hash BUT different filename. Log as duplicate.
 		fmt.Printf("Duplicate: %s is a copy of %s\n", filename, existingFilename)
-		_, err = db.Exec("INSERT INTO files (filename, hash, hasDuplicate, isFavorite) VALUES (?, ?, ?, FALSE)", filename, hash, existingID)
+		_, err = db.Exec("INSERT INTO files (filename, hash, hasDuplicate, isFavorite, image_width, image_height, file_size) VALUES (?, ?, ?, FALSE, ?, ?, ?)", filename, hash, existingID, imgWidth, imgHeight, fileSize)
 		if err != nil {
 			return result, fmt.Errorf("failed to insert duplicate file record: %w", err)
 		}
@@ -158,7 +240,7 @@ func ProcessNewImageUpload(db *sql.DB, apiKey, userName, filename, filePath stri
 	}
 
 	// Insert new original file
-	execRes, err := db.Exec("INSERT INTO files (filename, hash, isFavorite) VALUES (?, ?, FALSE)", filename, hash)
+	execRes, err := db.Exec("INSERT INTO files (filename, hash, isFavorite, image_width, image_height, file_size) VALUES (?, ?, FALSE, ?, ?, ?)", filename, hash, imgWidth, imgHeight, fileSize)
 	if err != nil {
 		return result, fmt.Errorf("failed to insert file record: %w", err)
 	}
@@ -191,61 +273,50 @@ func ProcessNewImageUpload(db *sql.DB, apiKey, userName, filename, filePath stri
 		return result, fmt.Errorf("iqdb api failed: %w", err)
 	}
 
-	var bestRecordID int64
-	var highestScore float64
-	for _, match := range matches {
-
-		// Do not add useless data
-		if match.Score < 69.0 {
-			continue
+	var bestMatch *IQDBMatch
+	for i := range matches {
+		if matches[i].Score >= 95.0 {
+			if bestMatch == nil || matches[i].Score > bestMatch.Score {
+				bestMatch = &matches[i]
+			}
 		}
+	}
 
+	// Only save metadata if we found an auto-verify 95%+ match
+	if bestMatch != nil {
 		query := `
 			INSERT INTO metadata_records 
-			(filename, provider_name, provider_id, score, file_url, large_file_url, rating, source, image_height, image_width, file_size)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			(filename, provider_name, provider_id, score, file_url, large_file_url, rating, source)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		`
 		execResMatch, err := db.Exec(query,
 			filename,
 			"danbooru",
-			fmt.Sprintf("%d", match.Post.ID),
-			match.Score,
-			match.Post.FileURL,
-			match.Post.LargeFileURL,
-			match.Post.Rating,
-			match.Post.Source,
-			match.Post.ImageHeight,
-			match.Post.ImageWidth,
-			match.Post.FileSize,
+			fmt.Sprintf("%d", bestMatch.Post.ID),
+			bestMatch.Score,
+			bestMatch.Post.FileURL,
+			bestMatch.Post.LargeFileURL,
+			bestMatch.Post.Rating,
+			bestMatch.Post.Source,
 		)
 		if err != nil {
-			fmt.Printf("Error saving match record for %d: %v\n", match.Post.ID, err)
-			continue
+			return result, fmt.Errorf("failed to save best match record: %w", err)
 		}
 
 		recordID, _ := execResMatch.LastInsertId()
+		saveTags(db, recordID, bestMatch.Post.TagsArtist, "artist")
+		saveTags(db, recordID, bestMatch.Post.TagsCharacters, "character")
+		saveTags(db, recordID, bestMatch.Post.TagsCopyright, "copyright")
+		saveTags(db, recordID, bestMatch.Post.TagsGeneral, "general")
+		saveTags(db, recordID, bestMatch.Post.TagsMeta, "meta")
 
-		saveTags(db, recordID, match.Post.TagsArtist, "artist")
-		saveTags(db, recordID, match.Post.TagsCharacters, "character")
-		saveTags(db, recordID, match.Post.TagsCopyright, "copyright")
-		saveTags(db, recordID, match.Post.TagsGeneral, "general")
-		saveTags(db, recordID, match.Post.TagsMeta, "meta")
-
-		if match.Score > highestScore {
-			highestScore = match.Score
-			bestRecordID = recordID
-		}
-	}
-
-	// Auto-Verify if 95%+ match
-	if highestScore >= 95.0 && bestRecordID > 0 {
-		_, err = db.Exec("UPDATE files SET active_metadata_id = ? WHERE filename = ?", bestRecordID, filename)
+		_, err = db.Exec("UPDATE files SET active_metadata_id = ? WHERE filename = ?", recordID, filename)
 		if err != nil {
 			return result, fmt.Errorf("failed to lock in active metadata: %w", err)
 		}
 		result.AutoMatch = true
 	} else {
-		fmt.Printf("No 95%%+ match found. Saved %d potential matches to the verification queue.\n", len(matches))
+		fmt.Printf("No 95%%+ match found for %s. Unmatched image stored without unused metadata matches.\n", filename)
 	}
 
 	return result, nil
@@ -255,7 +326,7 @@ func GetApprovedMetadata(db *sql.DB, filename string) (*Post, error) {
 	query := `
 		SELECT 
 			m.provider_id, m.file_url, m.large_file_url, m.rating, 
-			m.source, m.image_height, m.image_width, m.file_size
+			m.source, f.image_height, f.image_width, f.file_size
 		FROM files f
 		JOIN metadata_records m ON f.active_metadata_id = m.id
 		WHERE f.filename = ?
@@ -357,8 +428,8 @@ func GetImageByID(db *sql.DB, fileID int64, includeMatches bool) (*Image, error)
 	var hasDuplicate sql.NullInt64
 	img.ID = fileID
 
-	err := db.QueryRow("SELECT filename, hash, isFavorite, active_metadata_id, IFNULL(thumbnail_path, ''), hasDuplicate FROM files WHERE id = ?", fileID).
-		Scan(&img.FileName, &img.Hash, &img.IsFavorite, &activeMetadataID, &img.ThumbnailPath, &hasDuplicate)
+	err := db.QueryRow("SELECT filename, hash, isFavorite, active_metadata_id, IFNULL(thumbnail_path, ''), hasDuplicate, image_width, image_height, file_size FROM files WHERE id = ?", fileID).
+		Scan(&img.FileName, &img.Hash, &img.IsFavorite, &activeMetadataID, &img.ThumbnailPath, &hasDuplicate, &img.ImageWidth, &img.ImageHeight, &img.FileSize)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("no file found with ID %d", fileID)
@@ -371,27 +442,16 @@ func GetImageByID(db *sql.DB, fileID int64, includeMatches bool) (*Image, error)
 		img.HasDuplicate = &val
 	}
 
-	var rows *sql.Rows
-	query := `
-	    SELECT id, provider_id, score, file_url, large_file_url, rating, 
-		   source, image_height, image_width, file_size 
-	    FROM metadata_records 
-	    WHERE `
-	var queryArg any
-
-	if includeMatches {
-		query += "filename = ?"
-		queryArg = img.FileName
-		img.IQDBMatches = make([]IQDBMatch, 0) // Initialize as [] so it isn't null
-	} else {
-		if !activeMetadataID.Valid {
-			return &img, nil
-		}
-		query += "id = ?"
-		queryArg = activeMetadataID.Int64
+	if !activeMetadataID.Valid {
+		return &img, nil
 	}
-	rows, err = db.Query(query, queryArg)
 
+	query := `
+	    SELECT id, provider_id, score, file_url, large_file_url, rating, source 
+	    FROM metadata_records 
+	    WHERE id = ?`
+
+	rows, err := db.Query(query, activeMetadataID.Int64)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query metadata records: %w", err)
 	}
@@ -404,11 +464,10 @@ func GetImageByID(db *sql.DB, fileID int64, includeMatches bool) (*Image, error)
 		var post Post
 
 		var rating, source, fileURL, largeFileURL sql.NullString
-		var imgHeight, imgWidth, fileSize sql.NullInt64
 
 		err := rows.Scan(
 			&recordID, &providerID, &score, &fileURL, &largeFileURL, &rating,
-			&source, &imgHeight, &imgWidth, &fileSize,
+			&source,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan metadata row: %w", err)
@@ -419,29 +478,17 @@ func GetImageByID(db *sql.DB, fileID int64, includeMatches bool) (*Image, error)
 		post.LargeFileURL = largeFileURL.String
 		post.Rating = rating.String
 		post.Source = source.String
-		post.ImageHeight = int(imgHeight.Int64)
-		post.ImageWidth = int(imgWidth.Int64)
-		post.FileSize = int(fileSize.Int64)
+		post.ImageHeight = img.ImageHeight
+		post.ImageWidth = img.ImageWidth
+		post.FileSize = int(img.FileSize)
 
-		if (activeMetadataID.Valid && recordID == activeMetadataID.Int64) || includeMatches {
-			err = populateTags(db, recordID, &post)
-			if err != nil {
-				return nil, fmt.Errorf("failed to populate tags for record: %w", err)
-			}
+		err = populateTags(db, recordID, &post)
+		if err != nil {
+			return nil, fmt.Errorf("failed to populate tags for record: %w", err)
 		}
 
-		if activeMetadataID.Valid && recordID == activeMetadataID.Int64 {
-			mainPost := post
-			img.MainData = &mainPost
-		}
-
-		if includeMatches {
-			img.IQDBMatches = append(img.IQDBMatches, IQDBMatch{
-				PostID: post.ID,
-				Score:  score.Float64,
-				Post:   post,
-			})
-		}
+		mainPost := post
+		img.MainData = &mainPost
 	}
 
 	if err = rows.Err(); err != nil {
@@ -540,7 +587,7 @@ func SearchImagesByTags(db *sql.DB, searchTokens []string) ([]Image, error) {
 			return fmt.Errorf("invalid numeric value in search token: '%s'", token)
 		}
 
-		whereClauses = append(whereClauses, fmt.Sprintf("m.%s %s ?", column, op))
+		whereClauses = append(whereClauses, fmt.Sprintf("f.%s %s ?", column, op))
 		args = append(args, val)
 		return nil
 	}
@@ -748,8 +795,8 @@ func UpdateImage(db *sql.DB, fileID int64, params UpdateImageParams) error {
 
 		query := `
 			INSERT INTO metadata_records 
-			(filename, provider_name, provider_id, score, file_url, large_file_url, rating, source, image_height, image_width, file_size)
-			VALUES (?, 'danbooru', ?, 100.0, ?, ?, ?, ?, ?, ?, ?)
+			(filename, provider_name, provider_id, score, file_url, large_file_url, rating, source)
+			VALUES (?, 'danbooru', ?, 100.0, ?, ?, ?, ?)
 		`
 
 		execRes, err := db.Exec(query,
@@ -759,9 +806,6 @@ func UpdateImage(db *sql.DB, fileID int64, params UpdateImageParams) error {
 			post.LargeFileURL,
 			post.Rating,
 			post.Source,
-			post.ImageHeight,
-			post.ImageWidth,
-			post.FileSize,
 		)
 		if err != nil {
 			return fmt.Errorf("failed to insert metadata record: %w", err)

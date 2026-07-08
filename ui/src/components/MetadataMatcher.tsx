@@ -164,7 +164,7 @@ const MetadataMatcher: React.FC<MetadataMatcherProps> = ({
           </div>
 
           <img
-            src={`/images/${fileName}`}
+            src={`/images/${fileName}?v=${currentWidth}x${currentHeight}`}
             alt="Original file"
             className="max-w-full max-h-[85%] object-contain rounded-lg mt-4"
             onLoad={(e) => {

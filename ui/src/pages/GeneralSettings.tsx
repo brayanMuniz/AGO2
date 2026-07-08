@@ -105,11 +105,14 @@ const SyncGalleryWidget: React.FC = () => {
 
         {/* Stats display from your wireframe */}
         {hasData && (
-          <div className="text-sm text-gray-400 font-mono flex gap-3">
-            <span>processed: <span className="text-white">{stats.processed}</span></span>
-            <span>auto: <span className="text-white">{stats.auto_match}</span></span>
-            <span>skipped: <span className="text-white">{stats.skipped}</span></span>
-            <span>TotalFiles: <span className="text-white">{stats.total_files}</span></span>
+          <div className="text-sm text-gray-400 font-mono flex items-center gap-4">
+            <span>
+              Auto Processed: <span className="text-white font-bold">{stats.auto_match} / {stats.processed}</span>
+            </span>
+            <span className="text-gray-600">|</span>
+            <span>
+              processed + skipped = total: <span className="text-white font-bold">{stats.processed} + {stats.skipped} = {stats.total_files}</span>
+            </span>
           </div>
         )}
       </div>

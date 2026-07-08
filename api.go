@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -382,25 +383,81 @@ func (a *App) handleBatchDeleteImages(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func DownloadAndReplaceImage(url, destPath string) error {
-	resp, err := http.Get(url)
-	if err != nil {
-		return fmt.Errorf("failed to download image: %w", err)
+func DownloadAndReplaceImage(urlStr, destPath string) error {
+	client := &http.Client{Timeout: 45 * time.Second}
+
+	userName := os.Getenv("USERNAME")
+	apiKey := os.Getenv("DANBOORU_KEY")
+
+	attemptDownload := func(targetURL string, userAgent string) (*http.Response, error) {
+		req, err := http.NewRequest("GET", targetURL, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("User-Agent", userAgent)
+		req.Header.Set("Accept", "image/*,*/*;q=0.8")
+		return client.Do(req)
 	}
+
+	userAgent := "AGO2-GalleryOrganizer/1.0"
+	if userName != "" {
+		userAgent = fmt.Sprintf("AGO2-GalleryOrganizer/1.0 (by %s on Danbooru)", userName)
+	}
+
+	resp, err := attemptDownload(urlStr, userAgent)
+	if err != nil {
+		return fmt.Errorf("failed to download image from %s: %w", urlStr, err)
+	}
+
+	// If 403 Forbidden or 401 Unauthorized, try attaching Danbooru API credentials
+	if (resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusUnauthorized) && userName != "" && apiKey != "" {
+		resp.Body.Close()
+		u, parseErr := url.Parse(urlStr)
+		if parseErr == nil {
+			q := u.Query()
+			q.Set("login", userName)
+			q.Set("api_key", apiKey)
+			u.RawQuery = q.Encode()
+			resp, err = attemptDownload(u.String(), userAgent)
+			if err != nil {
+				return fmt.Errorf("retry with auth failed: %w", err)
+			}
+		}
+	}
+
+	// If still failing with 403, try fallback User-Agent matching iqdb.go
+	if resp.StatusCode == http.StatusForbidden {
+		resp.Body.Close()
+		resp, err = attemptDownload(urlStr, "MyGoApp/1.0")
+		if err != nil {
+			return fmt.Errorf("retry with fallback user-agent failed: %w", err)
+		}
+	}
+
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("bad status fetching image: %s", resp.Status)
+		return fmt.Errorf("bad status fetching image (%d %s) from %s", resp.StatusCode, resp.Status, urlStr)
 	}
 
-	out, err := os.Create(destPath)
+	tmpPath := destPath + ".tmp_download"
+	out, err := os.Create(tmpPath)
 	if err != nil {
-		return fmt.Errorf("failed to create local file: %w", err)
+		return fmt.Errorf("failed to create temp file: %w", err)
 	}
-	defer out.Close()
 
-	_, err = io.Copy(out, resp.Body)
-	return err
+	written, err := io.Copy(out, resp.Body)
+	out.Close()
+	if err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("failed to save image data: %w", err)
+	}
+	if written == 0 {
+		os.Remove(tmpPath)
+		return fmt.Errorf("downloaded file was empty (0 bytes)")
+	}
+
+	return os.Rename(tmpPath, destPath)
 }
 
 // PATCH /api/image/{id}
@@ -465,10 +522,16 @@ func (a *App) handleImageUpdate(w http.ResponseWriter, r *http.Request) {
 			destPath := filepath.Join("./Gallery/", filename)
 			err := DownloadAndReplaceImage(targetURL, destPath)
 			if err != nil {
-				fmt.Printf("Warning: Database updated, but failed to replace physical file %s: %v\n", filename, err)
-				// We still return 200 OK since metadata linked
+				fmt.Printf("Error replacing physical file %s: %v\n", filename, err)
+				sendJSONError(w, fmt.Sprintf("Failed to download and replace file: %v", err), http.StatusInternalServerError)
+				return
+			}
+			fmt.Printf("Successfully replaced physical file for: %s\n", filename)
+			dimErr := UpdateFileDimensionsInDB(a.DB, filename, destPath)
+			if dimErr != nil {
+				fmt.Printf("Warning: failed to update file dimensions in DB for %s: %v\n", filename, dimErr)
 			} else {
-				fmt.Printf("Successfully replaced physical file for: %s\n", filename)
+				fmt.Printf("Successfully updated file dimensions in DB for: %s\n", filename)
 			}
 		} else {
 			// TODO: If the user tries to replace an image, but it does not let you we hit this

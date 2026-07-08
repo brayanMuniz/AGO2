@@ -231,7 +231,7 @@ const ImagePage: React.FC = () => {
         <main className="flex-1 flex items-center justify-center p-4 overflow-hidden min-h-0">
           <div className="relative w-full h-full flex items-center justify-center border-2 border-gray-600 rounded-[2rem] p-2">
             <img
-              src={`/images/${imageData.file_name}`}
+              src={`/images/${imageData.file_name}?v=${imageData.file_size || ''}`}
               alt={`Post ${post.id}`}
               className="max-w-full max-h-full object-contain rounded-xl"
               onError={(event) => {

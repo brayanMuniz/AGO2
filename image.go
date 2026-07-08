@@ -28,14 +28,16 @@ type Color struct {
 }
 
 type Image struct {
-	ID            int64       `json:"id"`
-	FileName      string      `json:"file_name"`
-	IsFavorite    bool        `json:"is_favorite"`
-	HasDuplicate  *int64      `json:"has_duplicate,omitempty"`
-	Hash          string      `json:"hash"`
-	MainData      *Post       `json:"main_data"`
-	ThumbnailPath string      `json:"thumbnail_path"`
-	IQDBMatches   []IQDBMatch `json:"iqdb_matches,omitempty"`
+	ID            int64  `json:"id"`
+	FileName      string `json:"file_name"`
+	IsFavorite    bool   `json:"is_favorite"`
+	HasDuplicate  *int64 `json:"has_duplicate,omitempty"`
+	Hash          string `json:"hash"`
+	MainData      *Post  `json:"main_data"`
+	ThumbnailPath string `json:"thumbnail_path"`
+	ImageWidth    int    `json:"image_width"`
+	ImageHeight   int    `json:"image_height"`
+	FileSize      int64  `json:"file_size"`
 }
 
 func GetPixelHash(filePath string) (string, error) {
