@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import TopBar from './TopBar';
 import DeleteImageButton from './DeleteImageButton';
+import CustomMetadataModal from './CustomMetadataModal';
 
 interface Post {
   id: number;
@@ -53,6 +54,21 @@ const MetadataMatcher: React.FC<MetadataMatcherProps> = ({
   const [confirmMatchId, setConfirmMatchId] = useState<number | null>(null);
   const [confirmAction, setConfirmAction] = useState<'match' | 'replace' | null>(null);
   const [updating, setUpdating] = useState<boolean>(false);
+  const [showCustomModal, setShowCustomModal] = useState<boolean>(false);
+  const [fetchedFileSize, setFetchedFileSize] = useState<number | undefined>(fileSize);
+
+  useEffect(() => {
+    if (fileSize !== undefined) {
+      setFetchedFileSize(fileSize);
+      return;
+    }
+    fetch(`/api/image/${imageId}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.file_size) setFetchedFileSize(data.file_size);
+      })
+      .catch(() => {});
+  }, [imageId, fileSize]);
 
   const formatBytes = (bytes: number) => {
     if (!bytes) return '0 Bytes';
@@ -180,8 +196,8 @@ const MetadataMatcher: React.FC<MetadataMatcherProps> = ({
 
           <div className="mt-4 flex flex-wrap gap-4 text-sm text-gray-400 bg-black/40 px-4 py-2 rounded-lg">
             <span>File: <span className="text-white">{fileName}</span></span>
-            {fileSize !== undefined && (
-              <span>Size: <span className="text-white">{formatBytes(fileSize)}</span></span>
+            {fetchedFileSize !== undefined && (
+              <span>Size: <span className="text-white">{formatBytes(fetchedFileSize)}</span></span>
             )}
             {currentWidth > 0 && currentHeight > 0 && (
               <span>Current Res: <span className="text-white font-mono">{currentWidth} × {currentHeight}</span></span>
@@ -192,7 +208,7 @@ const MetadataMatcher: React.FC<MetadataMatcherProps> = ({
         {/* RIGHT PANEL */}
         <div className="w-[500px] flex flex-col shrink-0 bg-[#1c1c24] border border-[#2a2a35] rounded-xl overflow-hidden h-full">
           <div className="p-4 border-b border-[#2a2a35] flex items-center justify-between bg-[#15151a] shrink-0">
-            <div className="flex flex-col gap-1 w-2/3">
+            <div className="flex flex-col gap-1 w-3/5">
               <label className="text-sm font-semibold text-gray-200 flex justify-between">
                 <span>Minimum Match:</span>
                 <span className="text-[#60a5fa]">{minScore}%</span>
@@ -208,20 +224,30 @@ const MetadataMatcher: React.FC<MetadataMatcherProps> = ({
               />
             </div>
 
-            <button
-              onClick={fetchMatches}
-              disabled={loading}
-              className="p-2 bg-[#2a2a35] hover:bg-[#3a3a45] text-gray-300 rounded-lg transition-colors flex items-center gap-2 cursor-pointer"
-              title="Refresh Matches"
-            >
-              {loading ? (
-                <span className="animate-spin h-5 w-5 border-2 border-[#60a5fa] border-t-transparent rounded-full block"></span>
-              ) : (
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-              )}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={fetchMatches}
+                disabled={loading}
+                className="p-2.5 bg-[#2a2a35] hover:bg-[#3a3a45] text-gray-300 rounded-lg transition-colors flex items-center justify-center cursor-pointer"
+                title="Refresh Matches"
+              >
+                {loading ? (
+                  <span className="animate-spin h-4 w-4 border-2 border-[#60a5fa] border-t-transparent rounded-full block"></span>
+                ) : (
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowCustomModal(true)}
+                className="px-3 py-2 bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 border border-purple-500/30 rounded-lg text-xs font-bold transition-all shadow cursor-pointer"
+              >
+                + Custom
+              </button>
+            </div>
           </div>
 
           <div className="flex-1 overflow-y-auto p-4 space-y-4 hide-scrollbar min-h-0">
@@ -433,6 +459,19 @@ const MetadataMatcher: React.FC<MetadataMatcherProps> = ({
           </div>
         </div>
       </div>
+
+      {showCustomModal && (
+        <CustomMetadataModal
+          imageId={imageId}
+          fileName={fileName}
+          onClose={() => setShowCustomModal(false)}
+          onSaved={() => {
+            setShowCustomModal(false);
+            if (onMatchSelected) onMatchSelected(0);
+            else window.location.reload();
+          }}
+        />
+      )}
     </div>
   );
 };

@@ -5,6 +5,7 @@ import DeleteImageButton from '../components/DeleteImageButton';
 import DuplicateImageNotice from '../components/DuplicateImageNotice';
 import MetadataMatcher from '../components/MetadataMatcher';
 import FavoriteStar from '../components/FavoriteStar';
+import CustomMetadataModal from '../components/CustomMetadataModal';
 import TopBar from '../components/TopBar';
 import type { ImageData } from '../types/image';
 
@@ -44,6 +45,7 @@ const ImagePage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showMatcher, setShowMatcher] = useState(false);
+  const [showCustomModal, setShowCustomModal] = useState(false);
 
   const fetchImage = useCallback(async () => {
     setLoading(true);
@@ -130,6 +132,7 @@ const ImagePage: React.FC = () => {
       <MetadataMatcher
         imageId={imageData.id}
         fileName={imageData.file_name}
+        fileSize={imageData.file_size}
         onMatchSelected={fetchImage}
       />
     );
@@ -141,6 +144,7 @@ const ImagePage: React.FC = () => {
       <MetadataMatcher
         imageId={imageData.id}
         fileName={imageData.file_name}
+        fileSize={imageData.file_size}
         onClose={() => setShowMatcher(false)}
         onMatchSelected={() => {
           setShowMatcher(false);
@@ -158,13 +162,23 @@ const ImagePage: React.FC = () => {
 
       <div className="flex flex-1 overflow-hidden">
         <aside className="w-72 bg-[#1c1c24] border-r border-[#2a2a35] overflow-y-auto p-4 flex-shrink-0 hide-scrollbar">
-          {/* TOP CONTROLS: Favorite | Search Quality | Delete */}
+          {/* TOP CONTROLS: Favorite | Customize | Search Quality | Delete */}
           <div className="flex items-center justify-between mb-4 bg-[#15151a] p-2 rounded-lg border border-[#2a2a35]">
-            <div className="flex items-center">
+            <div className="flex items-center gap-1.5">
               <FavoriteStar
                 isFavorite={imageData.is_favorite ?? false}
                 onToggle={handleToggleFavorite}
               />
+              <button
+                type="button"
+                onClick={() => setShowCustomModal(true)}
+                className="p-1.5 text-gray-400 hover:text-purple-400 hover:bg-[#2a2a35] rounded-full transition-colors cursor-pointer"
+                title="Customize Metadata"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                </svg>
+              </button>
             </div>
 
             <div className="flex items-center gap-1">
@@ -206,8 +220,12 @@ const ImagePage: React.FC = () => {
                 </span>
               </p>
 
-              {/* --- NEW: Link to Danbooru using post.id --- */}
-              {post.id && (
+              {post.source === 'Custom' || post.id === 0 ? (
+                <p className="truncate">
+                  Source:{' '}
+                  <span className="text-purple-400 font-semibold">Custom</span>
+                </p>
+              ) : post.id ? (
                 <p className="truncate">
                   Source:{' '}
                   <a
@@ -219,7 +237,11 @@ const ImagePage: React.FC = () => {
                     Danbooru ↗
                   </a>
                 </p>
-              )}
+              ) : post.source ? (
+                <p className="truncate">
+                  Source: <span className="text-gray-300">{post.source}</span>
+                </p>
+              ) : null}
 
               <p>
                 Rating: <span className="text-gray-400 capitalize">{post.rating}</span>
@@ -246,6 +268,19 @@ const ImagePage: React.FC = () => {
           </div>
         </main>
       </div>
+
+      {showCustomModal && (
+        <CustomMetadataModal
+          imageId={imageData.id}
+          fileName={imageData.file_name}
+          initialData={post}
+          onClose={() => setShowCustomModal(false)}
+          onSaved={() => {
+            setShowCustomModal(false);
+            fetchImage();
+          }}
+        />
+      )}
     </div>
   );
 };

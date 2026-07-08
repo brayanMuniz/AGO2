@@ -793,15 +793,21 @@ func UpdateImage(db *sql.DB, fileID int64, params UpdateImageParams) error {
 	if params.MainData != nil {
 		post := params.MainData
 
+		providerName := "danbooru"
+		if strings.EqualFold(post.Source, "Custom") {
+			providerName = "custom"
+		}
+
 		query := `
 			INSERT INTO metadata_records 
 			(filename, provider_name, provider_id, score, file_url, large_file_url, rating, source)
-			VALUES (?, 'danbooru', ?, 100.0, ?, ?, ?, ?)
+			VALUES (?, ?, ?, 100.0, ?, ?, ?, ?)
 		`
 
 		execRes, err := db.Exec(query,
 			filename,
-			fmt.Sprintf("%d", post.ID), // The Danbooru ID
+			providerName,
+			fmt.Sprintf("%d", post.ID),
 			post.FileURL,
 			post.LargeFileURL,
 			post.Rating,

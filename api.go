@@ -642,3 +642,93 @@ func ProxyImageHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(resp.StatusCode)
 	io.Copy(w, resp.Body)
 }
+
+type TagSuggestion struct {
+	Name     string `json:"name"`
+	Category string `json:"category"`
+	Count    int    `json:"count,omitempty"`
+}
+
+var (
+	tagToCategoryList []TagSuggestion
+	tagToCategoryOnce sync.Once
+)
+
+func loadTagToCategoryJSON() {
+	tagToCategoryOnce.Do(func() {
+		fileBytes, err := os.ReadFile("./ui/tag_to_category.json")
+		if err != nil {
+			fmt.Printf("Warning: failed to read ./ui/tag_to_category.json: %v\n", err)
+			return
+		}
+		var rawMap map[string]string
+		if err := json.Unmarshal(fileBytes, &rawMap); err != nil {
+			fmt.Printf("Warning: failed to unmarshal ./ui/tag_to_category.json: %v\n", err)
+			return
+		}
+		for k, v := range rawMap {
+			tagToCategoryList = append(tagToCategoryList, TagSuggestion{
+				Name:     k,
+				Category: v,
+			})
+		}
+		fmt.Printf("Loaded %d tags from ./ui/tag_to_category.json\n", len(tagToCategoryList))
+	})
+}
+
+// GET /api/tags/autocomplete?query=...&category=...
+func (a *App) handleTagAutocomplete(w http.ResponseWriter, r *http.Request) {
+	loadTagToCategoryJSON()
+
+	queryStr := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("query")))
+	categoryFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("category")))
+
+	// Check if query starts with a category prefix (e.g. "artist:miku")
+	if colonIdx := strings.Index(queryStr, ":"); colonIdx > 0 && categoryFilter == "" {
+		prefix := queryStr[:colonIdx]
+		catMap := map[string]string{
+			"artist":    "artist",
+			"character": "character",
+			"copyright": "copyright",
+			"general":   "general",
+			"meta":      "meta",
+			"rating":    "rating",
+			"year":      "year",
+		}
+		if cat, ok := catMap[prefix]; ok {
+			categoryFilter = cat
+			queryStr = strings.TrimSpace(queryStr[colonIdx+1:])
+		}
+	}
+
+	prefixMatches := []TagSuggestion{}
+	containsMatches := []TagSuggestion{}
+
+	for _, item := range tagToCategoryList {
+		if categoryFilter != "" && !strings.EqualFold(item.Category, categoryFilter) {
+			continue
+		}
+		if queryStr == "" {
+			prefixMatches = append(prefixMatches, item)
+			if len(prefixMatches) >= 30 {
+				break
+			}
+			continue
+		}
+
+		lowerName := strings.ToLower(item.Name)
+		if strings.HasPrefix(lowerName, queryStr) {
+			prefixMatches = append(prefixMatches, item)
+		} else if strings.Contains(lowerName, queryStr) {
+			containsMatches = append(containsMatches, item)
+		}
+	}
+
+	suggestions := append(prefixMatches, containsMatches...)
+	if len(suggestions) > 30 {
+		suggestions = suggestions[:30]
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(suggestions)
+}
