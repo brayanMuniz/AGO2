@@ -6,8 +6,10 @@ import (
 	"image"
 	"io"
 	"log"
+	"math"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -31,9 +33,19 @@ func InitDB(dbPath string) (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
+	var tableExists int
+	_ = db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='saved_palettes'").Scan(&tableExists)
+	isFirstTimePalettes := tableExists == 0
+
 	err = createTables(db)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create tables: %w", err)
+	}
+
+	if isFirstTimePalettes {
+		_, _ = db.Exec(`INSERT INTO saved_palettes (name, colors) VALUES
+			('Catppuccin', '#1e1e2e,#cba6f7,#f38ba8,#a6e3a1,#89b4fa'),
+			('Pastel Dream', '#ffb3ba,#ffdfba,#ffffba,#baffc9,#bae1ff')`)
 	}
 
 	log.Println("Database successfully initialized!")
@@ -106,6 +118,7 @@ func createTables(db *sql.DB) error {
 	    g INTEGER NOT NULL,
 	    b INTEGER NOT NULL,
 	    hex TEXT NOT NULL,
+	    weight REAL NOT NULL DEFAULT 0.0,
 	    FOREIGN KEY (file_id) REFERENCES files (id) ON DELETE CASCADE
 	);
 
@@ -118,6 +131,14 @@ func createTables(db *sql.DB) error {
 		sort_order TEXT DEFAULT 'desc',
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+
+	-- SAVED PALETTES
+	CREATE TABLE IF NOT EXISTS saved_palettes (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT NOT NULL UNIQUE,
+		colors TEXT NOT NULL,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 
 	-- Index for faster lookups when we doing math on colors columns
@@ -218,6 +239,68 @@ func DeleteSavedFilter(db *sql.DB, id int64) error {
 	return nil
 }
 
+type SavedPalette struct {
+	ID        int64    `json:"id"`
+	Name      string   `json:"name"`
+	Colors    []string `json:"colors"`
+	CreatedAt string   `json:"created_at"`
+}
+
+func GetSavedPalettes(db *sql.DB) ([]SavedPalette, error) {
+	rows, err := db.Query("SELECT id, name, colors, created_at FROM saved_palettes ORDER BY name ASC")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var palettes []SavedPalette
+	for rows.Next() {
+		var p SavedPalette
+		var colorsStr string
+		if err := rows.Scan(&p.ID, &p.Name, &colorsStr, &p.CreatedAt); err != nil {
+			continue
+		}
+		for _, c := range strings.Split(colorsStr, ",") {
+			cClean := strings.TrimSpace(c)
+			if cClean != "" {
+				p.Colors = append(p.Colors, cClean)
+			}
+		}
+		palettes = append(palettes, p)
+	}
+	return palettes, nil
+}
+
+func CreateSavedPalette(db *sql.DB, name string, colors []string) (*SavedPalette, error) {
+	nameClean := strings.TrimSpace(name)
+	if nameClean == "" {
+		return nil, fmt.Errorf("palette name cannot be empty")
+	}
+	if len(colors) == 0 {
+		return nil, fmt.Errorf("palette must contain at least one color")
+	}
+	colorsStr := strings.Join(colors, ",")
+
+	res, err := db.Exec("INSERT INTO saved_palettes (name, colors) VALUES (?, ?)", nameClean, colorsStr)
+	if err != nil {
+		return nil, err
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return nil, err
+	}
+	return &SavedPalette{
+		ID:     id,
+		Name:   nameClean,
+		Colors: colors,
+	}, nil
+}
+
+func DeleteSavedPalette(db *sql.DB, id int64) error {
+	_, err := db.Exec("DELETE FROM saved_palettes WHERE id = ?", id)
+	return err
+}
+
 type ProcessedImage struct {
 	AutoMatch bool
 	Skipped   bool
@@ -262,8 +345,8 @@ func UpdateFileDimensionsInDB(db *sql.DB, filename string, filePath string) erro
 		palette, _ := ExtractColorPalette(filePath, 5)
 		db.Exec("DELETE FROM image_colors WHERE file_id = ?", fileID)
 		for _, color := range palette {
-			db.Exec("INSERT INTO image_colors (file_id, r, g, b, hex) VALUES (?, ?, ?, ?, ?)",
-				fileID, color.R, color.G, color.B, color.Hex)
+			db.Exec("INSERT INTO image_colors (file_id, r, g, b, hex, weight) VALUES (?, ?, ?, ?, ?, ?)",
+				fileID, color.R, color.G, color.B, color.Hex, color.Weight)
 		}
 	}
 
@@ -311,8 +394,8 @@ func ProcessNewImageUpload(db *sql.DB, apiKey, userName, filename, filePath stri
 
 		db.Exec("DELETE FROM image_colors WHERE file_id = ?", existingFileID)
 		for _, color := range palette {
-			db.Exec("INSERT INTO image_colors (file_id, r, g, b, hex) VALUES (?, ?, ?, ?, ?)",
-				existingFileID, color.R, color.G, color.B, color.Hex)
+			db.Exec("INSERT INTO image_colors (file_id, r, g, b, hex, weight) VALUES (?, ?, ?, ?, ?, ?)",
+				existingFileID, color.R, color.G, color.B, color.Hex, color.Weight)
 		}
 
 		result.Skipped = true
@@ -354,8 +437,8 @@ func ProcessNewImageUpload(db *sql.DB, apiKey, userName, filename, filePath stri
 	// Save the extracted colors to the linked table
 	for _, color := range palette {
 		_, err = db.Exec(
-			"INSERT INTO image_colors (file_id, r, g, b, hex) VALUES (?, ?, ?, ?, ?)",
-			newFileID, color.R, color.G, color.B, color.Hex,
+			"INSERT INTO image_colors (file_id, r, g, b, hex, weight) VALUES (?, ?, ?, ?, ?, ?)",
+			newFileID, color.R, color.G, color.B, color.Hex, color.Weight,
 		)
 		if err != nil {
 			fmt.Printf("Warning: failed to insert color for %s: %v\n", filename, err)
@@ -663,6 +746,7 @@ func SearchImagesByTags(db *sql.DB, searchTokens []string) ([]Image, error) {
 	var ratings []string
 	var isFavoriteFilter *bool
 	var orderByColor string
+	var targetColors []Color
 
 	// Base query joining files to metadata_records
 	query := "SELECT f.id FROM files f LEFT JOIN metadata_records m ON f.active_metadata_id = m.id"
@@ -739,17 +823,22 @@ func SearchImagesByTags(db *sql.DB, searchTokens []string) ([]Image, error) {
 				}
 			}
 
-		} else if strings.HasPrefix(lowerToken, "color:#") {
+		} else if strings.HasPrefix(lowerToken, "color:") {
 			hexStr := strings.TrimPrefix(lowerToken, "color:")
-			var r, g, b int
-			fmt.Sscanf(hexStr, "#%02x%02x%02x", &r, &g, &b)
-
-			// SORT by the closest color distance using a subquery
-			orderByColor = fmt.Sprintf(`
-				(SELECT MIN((r - %d)*(r - %d) + (g - %d)*(g - %d) + (b - %d)*(b - %d)) 
-				 FROM image_colors WHERE file_id = f.id) ASC
-			`, r, r, g, g, b, b)
-
+			for _, p := range strings.Split(hexStr, ",") {
+				pClean := strings.TrimSpace(p)
+				if pClean != "" {
+					targetColors = append(targetColors, ParseHexToColor(pClean))
+				}
+			}
+		} else if strings.HasPrefix(lowerToken, "palette:") {
+			hexStr := strings.TrimPrefix(lowerToken, "palette:")
+			for _, p := range strings.Split(hexStr, ",") {
+				pClean := strings.TrimSpace(p)
+				if pClean != "" {
+					targetColors = append(targetColors, ParseHexToColor(pClean))
+				}
+			}
 		} else if lowerToken == "is:missing" {
 			whereClauses = append(whereClauses, "f.active_metadata_id IS NULL AND f.hasDuplicate IS NULL")
 		} else if lowerToken == "is:duplicate" {
@@ -823,6 +912,14 @@ func SearchImagesByTags(db *sql.DB, searchTokens []string) ([]Image, error) {
 
 	if err = rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating search rows: %w", err)
+	}
+
+	if len(targetColors) > 0 {
+		allowedIDs := make(map[int64]bool)
+		for _, id := range fileIDs {
+			allowedIDs[id] = true
+		}
+		return SearchImagesByPalette(db, targetColors, 35.0, allowedIDs)
 	}
 
 	// Fetch full image records
@@ -1109,45 +1206,116 @@ func GetImagesWithoutMetadata(db *sql.DB) ([]Image, error) {
 	return images, nil
 }
 
-// threshold determines how "strict" the match is (e.g., 2000 is very strict, 10000 is loose).
-func SearchImagesByColor(db *sql.DB, targetR, targetG, targetB, threshold int) ([]Image, error) {
-	// calculate the squared Euclidean distance directly in SQL.
-	query := `
-		SELECT DISTINCT file_id, 
-		       ((r - ?) * (r - ?) + (g - ?) * (g - ?) + (b - ?) * (b - ?)) as distance
-		FROM image_colors
-		WHERE distance <= ?
-		ORDER BY distance ASC
-		LIMIT 50
-	`
+// SearchImagesByPalette queries color palettes + weights from SQLite and runs in-memory CIE L*a*b* vibe matching.
+// Factors in perceptual color distance Delta E and relative weights, dropping images beyond threshold.
+func SearchImagesByPalette(db *sql.DB, targetColors []Color, threshold float64, allowedIDs map[int64]bool) ([]Image, error) {
+	if len(targetColors) == 0 {
+		return nil, nil
+	}
 
-	// Pass the target RGB variables twice each to satisfy the math, plus the threshold
-	rows, err := db.Query(query, targetR, targetR, targetG, targetG, targetB, targetB, threshold)
+	query := `SELECT file_id, r, g, b, hex, weight FROM image_colors`
+	rows, err := db.Query(query)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query colors: %w", err)
+		return nil, fmt.Errorf("failed to query image_colors: %w", err)
 	}
 	defer rows.Close()
 
-	var fileIDs []int64
+	palettes := make(map[int64][]Color)
 	for rows.Next() {
-		var id int64
-		var distance int
-		if err := rows.Scan(&id, &distance); err != nil {
-			return nil, err
+		var fileID int64
+		var c Color
+		if err := rows.Scan(&fileID, &c.R, &c.G, &c.B, &c.Hex, &c.Weight); err != nil {
+			continue
 		}
-		fileIDs = append(fileIDs, id)
+		if allowedIDs != nil && len(allowedIDs) > 0 && !allowedIDs[fileID] {
+			continue
+		}
+		palettes[fileID] = append(palettes[fileID], c)
 	}
 
+	type matchScore struct {
+		fileID   int64
+		distance float64
+	}
+	var matches []matchScore
+
+	for fileID, imgPalette := range palettes {
+		if len(imgPalette) == 0 {
+			continue
+		}
+
+		distT2P := 0.0
+		for _, tc := range targetColors {
+			minD := math.MaxFloat64
+			for _, pc := range imgPalette {
+				d := ColorDistanceLAB(tc, pc)
+				if d < minD {
+					minD = d
+				}
+			}
+			distT2P += minD
+		}
+		distT2P /= float64(len(targetColors))
+
+		distP2T := 0.0
+		totalWeight := 0.0
+		for _, pc := range imgPalette {
+			minD := math.MaxFloat64
+			for _, tc := range targetColors {
+				d := ColorDistanceLAB(pc, tc)
+				if d < minD {
+					minD = d
+				}
+			}
+			w := pc.Weight
+			if w <= 0 {
+				w = 1.0 / float64(len(imgPalette))
+			}
+			distP2T += minD * w
+			totalWeight += w
+		}
+		if totalWeight > 0 {
+			distP2T /= totalWeight
+		}
+
+		vibeDist := (distT2P + distP2T) / 2.0
+
+		if vibeDist <= threshold {
+			matches = append(matches, matchScore{fileID: fileID, distance: vibeDist})
+		}
+	}
+
+	sort.Slice(matches, func(i, j int) bool {
+		return matches[i].distance < matches[j].distance
+	})
+
 	var images []Image
-	for _, id := range fileIDs {
-		img, err := GetImageByID(db, id, false)
-		if err != nil {
+	for _, m := range matches {
+		img, err := GetImageByID(db, m.fileID, false)
+		if err != nil || img == nil {
 			continue
 		}
 		images = append(images, *img)
 	}
 
 	return images, nil
+}
+
+// SearchImagesByColor remains for backward compatibility, delegating to perceptual SearchImagesByPalette.
+func SearchImagesByColor(db *sql.DB, targetR, targetG, targetB, threshold int) ([]Image, error) {
+	c := Color{
+		R:      targetR,
+		G:      targetG,
+		B:      targetB,
+		Hex:    fmt.Sprintf("#%02x%02x%02x", targetR, targetG, targetB),
+		Weight: 1.0,
+	}
+	// Default strict cutoff around 35.0 perceptual Delta E if threshold <= 0
+	cut := float64(threshold)
+	if cut <= 0 {
+		cut = 35.0
+	}
+	return SearchImagesByPalette(db, []Color{c}, cut, nil)
 }
 
 // Brightness ranges from 0 (pitch black) to 255 (pure white).

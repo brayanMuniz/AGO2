@@ -9,6 +9,7 @@ import (
 	_ "image/gif"
 	"image/jpeg"
 	_ "image/png"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -21,10 +22,11 @@ import (
 )
 
 type Color struct {
-	R   int    `json:"r"`
-	G   int    `json:"g"`
-	B   int    `json:"b"`
-	Hex string `json:"hex"`
+	R      int     `json:"r"`
+	G      int     `json:"g"`
+	B      int     `json:"b"`
+	Hex    string  `json:"hex"`
+	Weight float64 `json:"weight"`
 }
 
 type Image struct {
@@ -39,6 +41,67 @@ type Image struct {
 	ImageWidth    int    `json:"image_width"`
 	ImageHeight   int    `json:"image_height"`
 	FileSize      int64  `json:"file_size"`
+}
+
+// RGBToLAB converts standard 8-bit sRGB (0-255) to CIE L*a*b* (D65 illuminant).
+func RGBToLAB(r, g, b int) (l, a, bVal float64) {
+	lin := func(c int) float64 {
+		v := float64(c) / 255.0
+		if v <= 0.04045 {
+			return v / 12.92
+		}
+		return math.Pow((v+0.055)/1.055, 2.4)
+	}
+
+	rl := lin(r)
+	gl := lin(g)
+	bl := lin(b)
+
+	x := (0.4124564*rl + 0.3575761*gl + 0.1804375*bl) / 0.95047
+	y := (0.2126729*rl + 0.7151522*gl + 0.0721750*bl) / 1.00000
+	z := (0.0193339*rl + 0.1191920*gl + 0.9503041*bl) / 1.08883
+
+	f := func(t float64) float64 {
+		if t > 0.008856 {
+			return math.Cbrt(t)
+		}
+		return (7.787 * t) + (16.0 / 116.0)
+	}
+
+	fx := f(x)
+	fy := f(y)
+	fz := f(z)
+
+	l = (116.0 * fy) - 16.0
+	a = 500.0 * (fx - fy)
+	bVal = 200.0 * (fy - fz)
+	return l, a, bVal
+}
+
+// ColorDistanceLAB computes perceptual Euclidean distance Delta E in CIE L*a*b* space.
+func ColorDistanceLAB(c1, c2 Color) float64 {
+	l1, a1, b1 := RGBToLAB(c1.R, c1.G, c1.B)
+	l2, a2, b2 := RGBToLAB(c2.R, c2.G, c2.B)
+	dl := l1 - l2
+	da := a1 - a2
+	db := b1 - b2
+	return math.Sqrt(dl*dl + da*da + db*db)
+}
+
+// ParseHexToColor converts "#RRGGBB" or "RRGGBB" into a Color struct.
+func ParseHexToColor(hexStr string) Color {
+	clean := strings.TrimPrefix(hexStr, "#")
+	var r, g, b int
+	if len(clean) == 6 {
+		fmt.Sscanf(clean, "%02x%02x%02x", &r, &g, &b)
+	}
+	return Color{
+		R:      r,
+		G:      g,
+		B:      b,
+		Hex:    "#" + clean,
+		Weight: 1.0,
+	}
 }
 
 func GetPixelHash(filePath string) (string, error) {
@@ -124,7 +187,7 @@ func GenerateThumbnail(originalPath, thumbnailDir string) (string, error) {
 	return outPath, nil
 }
 
-// Extracts the top N dominant colors from an image and returns them as Color structs
+// Extracts the top N dominant colors from an image and returns them as Color structs with weight
 func ExtractColorPalette(filePath string, numColors int) ([]Color, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
@@ -140,9 +203,9 @@ func ExtractColorPalette(filePath string, numColors int) ([]Color, error) {
 	dstImg := image.NewRGBA(image.Rect(0, 0, 50, 50))
 	xdraw.BiLinear.Scale(dstImg, dstImg.Bounds(), srcImg, srcImg.Bounds(), xdraw.Over, nil)
 
-	// Tally colors into quantized buckets (reduces noise/slight variations)
 	colorCounts := make(map[string]int)
 	bounds := dstImg.Bounds()
+	var totalPixels int
 
 	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
 		for x := bounds.Min.X; x < bounds.Max.X; x++ {
@@ -152,6 +215,7 @@ func ExtractColorPalette(filePath string, numColors int) ([]Color, error) {
 			if a == 0 {
 				continue
 			}
+			totalPixels++
 
 			// Downscale 16-bit to 8-bit, then mask the lower bits to group similar colors
 			r8 := (r >> 8) & 0xF0
@@ -163,7 +227,6 @@ func ExtractColorPalette(filePath string, numColors int) ([]Color, error) {
 		}
 	}
 
-	// Sort the buckets by frequency
 	type colorFreq struct {
 		Hex   string
 		Count int
@@ -177,18 +240,22 @@ func ExtractColorPalette(filePath string, numColors int) ([]Color, error) {
 		return frequencies[i].Count > frequencies[j].Count
 	})
 
-	// Extract top N as Color structs
 	var palette []Color
 	for i := 0; i < len(frequencies) && i < numColors; i++ {
 		var r, g, b int
-		// Parse the hex string back into RGB integers
 		fmt.Sscanf(frequencies[i].Hex, "#%02x%02x%02x", &r, &g, &b)
 
+		weight := 0.0
+		if totalPixels > 0 {
+			weight = float64(frequencies[i].Count) / float64(totalPixels)
+		}
+
 		palette = append(palette, Color{
-			R:   r,
-			G:   g,
-			B:   b,
-			Hex: frequencies[i].Hex,
+			R:      r,
+			G:      g,
+			B:      b,
+			Hex:    frequencies[i].Hex,
+			Weight: weight,
 		})
 	}
 

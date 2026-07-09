@@ -25,6 +25,12 @@ import {
 
 type TagCount = { name: string; count: number };
 
+interface SavedPalette {
+  id: number;
+  name: string;
+  colors: string[];
+}
+
 const CATEGORY_COLORS: Record<TagCategory, string> = {
   artist: 'text-[#fca5a5]',
   copyright: 'text-[#c084fc]',
@@ -87,9 +93,16 @@ const extractBrightness = (query: string): [number, number] | null => {
   return match ? [parseInt(match[1], 10), parseInt(match[2], 10)] : null;
 };
 
-const extractColor = (query: string): string | null => {
-  const match = query.match(/(?:^|\s)color:(#[0-9a-fA-F]{6})(?:\s|$)/);
-  return match ? match[1] : null;
+const extractPaletteColors = (query: string): string[] => {
+  const palMatch = query.match(/(?:^|\s)palette:([^\s]+)(?:\s|$)/);
+  if (palMatch) {
+    return palMatch[1].split(',').filter(Boolean);
+  }
+  const colMatch = query.match(/(?:^|\s)color:([^\s]+)(?:\s|$)/);
+  if (colMatch) {
+    return colMatch[1].split(',').filter(Boolean);
+  }
+  return [];
 };
 
 // Reusable Dual Slider Component styled to match your old UI perfectly
@@ -174,6 +187,10 @@ const SearchPage: React.FC = () => {
   const [brightness, setBrightness] = useState<[number, number]>([0, 255]);
   const [color, setColor] = useState<string>('#000000');
   const [hasColor, setHasColor] = useState(false);
+  const [vibePalette, setVibePalette] = useState<string[]>([]);
+  const [savedPalettes, setSavedPalettes] = useState<SavedPalette[]>([]);
+  const [isSavingPalette, setIsSavingPalette] = useState(false);
+  const [newPaletteName, setNewPaletteName] = useState('');
 
   const [widthRange, setWidthRange] = useState<[number, number]>([0, 10500]);
   const [heightRange, setHeightRange] = useState<[number, number]>([0, 10500]);
@@ -201,11 +218,13 @@ const SearchPage: React.FC = () => {
     const b = extractBrightness(tagsQuery);
     setBrightness(b || [0, 255]);
 
-    const c = extractColor(tagsQuery);
-    if (c) {
-      setColor(c);
+    const extractedColors = extractPaletteColors(tagsQuery);
+    if (extractedColors.length > 0) {
+      setVibePalette(extractedColors);
       setHasColor(true);
+      setColor(extractedColors[0]);
     } else {
+      setVibePalette([]);
       setHasColor(false);
     }
 
@@ -328,15 +347,91 @@ const SearchPage: React.FC = () => {
     }, 350);
   };
 
+  const fetchSavedPalettes = async () => {
+    try {
+      const res = await fetch('/api/palettes');
+      if (res.ok) {
+        const data = await res.json();
+        setSavedPalettes(data || []);
+      }
+    } catch (err) {
+      console.error('Failed to load saved palettes:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchSavedPalettes();
+  }, []);
+
+  const handleSavePalette = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newPaletteName.trim() || vibePalette.length === 0) return;
+
+    try {
+      const res = await fetch('/api/palettes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newPaletteName.trim(),
+          colors: vibePalette,
+        }),
+      });
+      if (res.ok) {
+        setNewPaletteName('');
+        setIsSavingPalette(false);
+        fetchSavedPalettes();
+      } else {
+        const err = await res.json();
+        alert(err.error || 'Failed to save palette');
+      }
+    } catch (err) {
+      console.error('Error saving palette:', err);
+    }
+  };
+
+  const handleDeleteSavedPalette = async (id: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await fetch(`/api/palettes/${id}`, { method: 'DELETE' });
+      fetchSavedPalettes();
+    } catch (err) {
+      console.error('Error deleting saved palette:', err);
+    }
+  };
+
+  const handleApplyPalette = (colors: string[]) => {
+    setVibePalette(colors);
+    setHasColor(colors.length > 0);
+
+    let tokens = tagsQuery.split(/\s+/).filter(Boolean);
+    tokens = tokens.filter((t) => !t.startsWith('palette:') && !t.startsWith('color:'));
+    if (colors.length > 0) {
+      tokens.push(`palette:${colors.join(',')}`);
+    }
+    const newQuery = tokens.join(' ');
+
+    if (debounceRef.current) window.clearTimeout(debounceRef.current);
+    debounceRef.current = window.setTimeout(() => {
+      updateUrlParams(newQuery);
+    }, 150);
+  };
+
   const handleColorChange = (newColor: string) => {
     setColor(newColor);
-    setHasColor(true);
-    updateSpecialFilter('color:', `color:${newColor}`);
+  };
+
+  const handleAddCurrentColorToPalette = () => {
+    const updated = Array.from(new Set([...vibePalette, color]));
+    handleApplyPalette(updated);
+  };
+
+  const handleRemoveColorFromPalette = (cToRemove: string) => {
+    const updated = vibePalette.filter((c) => c !== cToRemove);
+    handleApplyPalette(updated);
   };
 
   const handleClearColor = () => {
-    setHasColor(false);
-    updateSpecialFilter('color:', null);
+    handleApplyPalette([]);
   };
 
   const handleAddTag = (category: TagCategory, name: string) => {
@@ -599,23 +694,121 @@ const SearchPage: React.FC = () => {
 
               <div className="mb-4">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Color Palette</span>
+                  <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Palette Match</span>
                   {hasColor && (
                     <button onClick={handleClearColor} className="text-xs text-red-400 hover:text-red-300 transition-colors">
                       Clear
                     </button>
                   )}
                 </div>
-                <div className="flex items-center gap-3">
+
+                {/* Saved Palettes */}
+                {savedPalettes.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mb-2.5">
+                    {savedPalettes.map((p) => (
+                      <div
+                        key={p.id}
+                        onClick={() => handleApplyPalette(p.colors)}
+                        className="group cursor-pointer px-2 py-1 bg-[#1c1c24] hover:bg-[#2a2a35] border border-[#2a2a35] rounded text-[10px] text-gray-300 transition-colors flex items-center gap-1"
+                      >
+                        <span className="flex">
+                          {p.colors.slice(0, 3).map((c) => (
+                            <span
+                              key={c}
+                              className="w-2 h-2 rounded-full inline-block -ml-0.5 first:ml-0"
+                              style={{ backgroundColor: c }}
+                            />
+                          ))}
+                        </span>
+                        <span>{p.name}</span>
+                        <button
+                          type="button"
+                          onClick={(e) => handleDeleteSavedPalette(p.id, e)}
+                          className="text-gray-500 hover:text-red-400 ml-0.5 transition-colors"
+                          title="Delete saved palette"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Active Vibe Palette Swatches */}
+                {vibePalette.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mb-2.5 p-2 bg-[#15151a] border border-[#2a2a35] rounded max-h-24 overflow-y-auto">
+                    {vibePalette.map((c) => (
+                      <button
+                        key={c}
+                        type="button"
+                        onClick={() => handleRemoveColorFromPalette(c)}
+                        className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-[#1c1c24] hover:bg-[#2a2a35] border border-[#2a2a35] hover:border-red-500/50 text-[10px] text-gray-300 hover:text-red-300 font-mono transition-all cursor-pointer"
+                        title="Click to remove color"
+                      >
+                        <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: c }} />
+                        <span>{c.toUpperCase()}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                <div className="flex flex-wrap items-center gap-2">
                   <input
-                    type="color" value={hasColor ? color : '#000000'}
+                    type="color"
+                    value={color}
                     onChange={(e) => handleColorChange(e.target.value)}
-                    className="w-8 h-8 rounded cursor-pointer bg-transparent border-0 p-0" title="Pick a color"
+                    className="w-8 h-8 rounded cursor-pointer bg-transparent border-0 p-0 shrink-0"
+                    title="Select a color"
                   />
-                  <span className="text-xs text-gray-500 font-mono">
-                    {hasColor ? color.toUpperCase() : 'None selected'}
-                  </span>
+                  <button
+                    type="button"
+                    onClick={handleAddCurrentColorToPalette}
+                    className="px-2.5 py-1.5 bg-[#2563eb] hover:bg-[#1d4ed8] text-white rounded text-xs font-medium transition-colors shrink-0"
+                  >
+                    Add Color
+                  </button>
+
+                  {vibePalette.length > 0 && !isSavingPalette && (
+                    <button
+                      type="button"
+                      onClick={() => setIsSavingPalette(true)}
+                      className="px-2.5 py-1.5 bg-[#2a2a35] hover:bg-[#3a3a45] text-gray-200 border border-[#3e3957] rounded text-xs transition-colors shrink-0 flex items-center gap-1"
+                      title="Save current palette"
+                    >
+                      Save Palette
+                    </button>
+                  )}
                 </div>
+
+                {isSavingPalette && (
+                  <form onSubmit={handleSavePalette} className="mt-2.5 p-2 bg-[#15151a] border border-[#2a2a35] rounded flex items-center gap-2">
+                    <input
+                      type="text"
+                      placeholder="Palette name..."
+                      value={newPaletteName}
+                      onChange={(e) => setNewPaletteName(e.target.value)}
+                      className="flex-1 min-w-0 bg-[#1c1c24] border border-[#2a2a35] rounded px-2 py-1 text-xs text-gray-200 focus:outline-none focus:border-blue-500"
+                      autoFocus
+                    />
+                    <button
+                      type="submit"
+                      disabled={!newPaletteName.trim()}
+                      className="px-2.5 py-1 bg-[#2563eb] hover:bg-[#1d4ed8] disabled:opacity-50 text-white rounded text-xs font-medium transition-colors"
+                    >
+                      Save
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsSavingPalette(false);
+                        setNewPaletteName('');
+                      }}
+                      className="px-2 py-1 bg-[#2a2a35] hover:bg-[#3a3a45] text-gray-300 rounded text-xs transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </form>
+                )}
               </div>
 
               <RenderDualSlider
