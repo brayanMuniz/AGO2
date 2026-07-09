@@ -914,3 +914,25 @@ func (a *App) handleDeleteSavedPalette(w http.ResponseWriter, r *http.Request) {
 		"message": fmt.Sprintf("Deleted saved palette ID %d", id),
 	})
 }
+
+// POST /api/palettes/extract
+func (a *App) handleExtractPaletteFromImages(w http.ResponseWriter, r *http.Request) {
+	var reqBody struct {
+		IDs []int64 `json:"ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil || len(reqBody.IDs) == 0 {
+		sendJSONError(w, "Invalid or empty IDs list", http.StatusBadRequest)
+		return
+	}
+
+	colors, err := ExtractCombinedPaletteFromImages(a.DB, reqBody.IDs)
+	if err != nil {
+		sendJSONError(w, "Failed to extract palette from selected images", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string][]string{
+		"colors": colors,
+	})
+}

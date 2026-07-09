@@ -174,6 +174,7 @@ const SearchPage: React.FC = () => {
   const [selectionMode, setSelectionMode] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isExtractingPalette, setIsExtractingPalette] = useState(false);
 
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({});
 
@@ -533,6 +534,38 @@ const SearchPage: React.FC = () => {
       alert(err.message || 'An error occurred during deletion.');
     } finally {
       setIsDeleting(false);
+    }
+  };
+
+  const handleExtractPaletteFromSelected = async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0 || isExtractingPalette) return;
+
+    setIsExtractingPalette(true);
+    try {
+      const res = await fetch('/api/palettes/extract', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.colors && data.colors.length > 0) {
+          handleApplyPalette(data.colors);
+          setSelectionMode(false);
+          setSelectedIds(new Set());
+        } else {
+          alert('Could not extract dominant colors from selected images.');
+        }
+      } else {
+        const err = await res.json();
+        alert(err.error || 'Failed to extract palette');
+      }
+    } catch (err) {
+      console.error('Error extracting palette:', err);
+      alert('Error extracting palette');
+    } finally {
+      setIsExtractingPalette(false);
     }
   };
 
@@ -980,6 +1013,15 @@ const SearchPage: React.FC = () => {
 
               {selectionMode && selectedImageIds.length > 0 && (
                 <>
+                  <button
+                    type="button"
+                    onClick={handleExtractPaletteFromSelected}
+                    disabled={isDeleting || isExtractingPalette}
+                    className="px-2.5 py-1.5 rounded border border-purple-500/50 text-purple-300 hover:bg-purple-500/20 hover:text-purple-200 hover:border-purple-400 disabled:opacity-50 transition-colors flex items-center gap-1.5"
+                  >
+                    {isExtractingPalette ? 'Extracting...' : `Extract Palette (${selectedImageIds.length})`}
+                  </button>
+
                   <button
                     type="button"
                     onClick={() => setShowExportModal(true)}

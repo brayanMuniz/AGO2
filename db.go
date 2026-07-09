@@ -1363,3 +1363,129 @@ func SearchImagesByBrightness(db *sql.DB, minBrightness, maxBrightness float64) 
 
 	return images, nil
 }
+
+// ExtractCombinedPaletteFromImages takes a list of file IDs, fetches their extracted colors
+// (or extracts on-the-fly if missing), clusters perceptually similar colors using ColorDistanceLAB,
+// and guarantees returning at least 5 representative hex colors ranked by dominant weight.
+func ExtractCombinedPaletteFromImages(db *sql.DB, fileIDs []int64) ([]string, error) {
+	if len(fileIDs) == 0 {
+		return []string{}, nil
+	}
+
+	type colorEntry struct {
+		c      Color
+		weight float64
+	}
+	var allColors []colorEntry
+
+	for _, id := range fileIDs {
+		rows, err := db.Query("SELECT r, g, b, hex, weight FROM image_colors WHERE file_id = ?", id)
+		if err == nil {
+			for rows.Next() {
+				var c Color
+				var w float64
+				if err := rows.Scan(&c.R, &c.G, &c.B, &c.Hex, &w); err == nil {
+					allColors = append(allColors, colorEntry{c: c, weight: w})
+				}
+			}
+			rows.Close()
+		}
+
+		// If DB didn't provide enough colors, extract more directly from the file
+		if len(allColors) < 10 {
+			var filename string
+			if err := db.QueryRow("SELECT filename FROM files WHERE id = ?", id).Scan(&filename); err == nil {
+				filePath := filepath.Join("Gallery", filename)
+				if pal, err := ExtractColorPalette(filePath, 10); err == nil {
+					for _, c := range pal {
+						allColors = append(allColors, colorEntry{c: c, weight: c.Weight})
+					}
+				}
+			}
+		}
+	}
+
+	if len(allColors) == 0 {
+		return []string{"#1e1e2e", "#cba6f7", "#f38ba8", "#a6e3a1", "#89b4fa"}, nil
+	}
+
+	// Sort candidate colors by weight descending
+	sort.Slice(allColors, func(i, j int) bool {
+		return allColors[i].weight > allColors[j].weight
+	})
+
+	type cluster struct {
+		c      Color
+		weight float64
+	}
+	var clusters []cluster
+
+	// First pass: cluster with moderate perceptual distance
+	for _, entry := range allColors {
+		merged := false
+		for idx, cl := range clusters {
+			if ColorDistanceLAB(entry.c, cl.c) < 12.0 {
+				clusters[idx].weight += entry.weight
+				merged = true
+				break
+			}
+		}
+		if !merged {
+			clusters = append(clusters, cluster{c: entry.c, weight: entry.weight})
+		}
+	}
+
+	sort.Slice(clusters, func(i, j int) bool {
+		return clusters[i].weight > clusters[j].weight
+	})
+
+	var result []string
+	seenHex := make(map[string]bool)
+
+	for _, cl := range clusters {
+		hex := strings.ToLower(cl.c.Hex)
+		if !seenHex[hex] {
+			seenHex[hex] = true
+			result = append(result, cl.c.Hex)
+		}
+		if len(result) >= 5 {
+			break
+		}
+	}
+
+	// Second pass: if fewer than 5, include remaining unique hexes from allColors
+	for _, entry := range allColors {
+		if len(result) >= 5 {
+			break
+		}
+		hex := strings.ToLower(entry.c.Hex)
+		if !seenHex[hex] {
+			seenHex[hex] = true
+			result = append(result, entry.c.Hex)
+		}
+	}
+
+	// Third pass: if STILL fewer than 5 (e.g. single monochromatic image), generate harmonious tints/shades
+	if len(result) < 5 && len(allColors) > 0 {
+		base := allColors[0].c
+		variations := []Color{
+			{R: int(math.Min(255, float64(base.R)+float64(255-base.R)*0.35)), G: int(math.Min(255, float64(base.G)+float64(255-base.G)*0.35)), B: int(math.Min(255, float64(base.B)+float64(255-base.B)*0.35))},
+			{R: int(float64(base.R) * 0.65), G: int(float64(base.G) * 0.65), B: int(float64(base.B) * 0.65)},
+			{R: int(math.Min(255, float64(base.R)+float64(255-base.R)*0.6)), G: int(math.Min(255, float64(base.G)+float64(255-base.G)*0.6)), B: int(math.Min(255, float64(base.B)+float64(255-base.B)*0.6))},
+			{R: int(float64(base.R) * 0.4), G: int(float64(base.G) * 0.4), B: int(float64(base.B) * 0.4)},
+			{R: base.B, G: base.R, B: base.G}, // subtle rotated accent
+		}
+		for _, v := range variations {
+			if len(result) >= 5 {
+				break
+			}
+			hex := fmt.Sprintf("#%02x%02x%02x", v.R, v.G, v.B)
+			if !seenHex[strings.ToLower(hex)] {
+				seenHex[strings.ToLower(hex)] = true
+				result = append(result, hex)
+			}
+		}
+	}
+
+	return result, nil
+}

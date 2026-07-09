@@ -66,6 +66,7 @@ func main() {
 	http.HandleFunc("POST /api/image/batch-delete", app.handleBatchDeleteImages)
 	http.HandleFunc("POST /api/filters", app.handleCreateSavedFilter)
 	http.HandleFunc("POST /api/palettes", app.handleCreateSavedPalette)
+	http.HandleFunc("POST /api/palettes/extract", app.handleExtractPaletteFromImages)
 
 	http.HandleFunc("PATCH /api/image/{id}", app.handleImageUpdate)
 
