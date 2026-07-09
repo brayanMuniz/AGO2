@@ -32,6 +32,13 @@ interface MetadataMatcherProps {
   fileSize?: number;
   onMatchSelected?: (postId: number) => void;
   onClose?: () => void;
+  inQueue?: boolean;
+  isFirst?: boolean;
+  isLast?: boolean;
+  queuePosition?: number;
+  queueTotal?: number;
+  onPrev?: () => void;
+  onNext?: () => void;
 }
 
 const MetadataMatcher: React.FC<MetadataMatcherProps> = ({
@@ -40,6 +47,13 @@ const MetadataMatcher: React.FC<MetadataMatcherProps> = ({
   fileSize,
   onMatchSelected,
   onClose,
+  inQueue,
+  isFirst,
+  isLast,
+  queuePosition,
+  queueTotal,
+  onPrev,
+  onNext,
 }) => {
   const [matches, setMatches] = useState<MatchRecord[]>([]);
   const [minScore, setMinScore] = useState<number>(70);
@@ -143,7 +157,9 @@ const MetadataMatcher: React.FC<MetadataMatcherProps> = ({
       setConfirmMatchId(null);
       setConfirmAction(null);
 
-      if (onMatchSelected) {
+      if (inQueue && onNext && !isLast) {
+        onNext();
+      } else if (onMatchSelected) {
         onMatchSelected(confirmMatchId);
       } else {
         window.location.reload();
@@ -176,6 +192,11 @@ const MetadataMatcher: React.FC<MetadataMatcherProps> = ({
               imageId={imageId}
               redirectTo="/"
               variant="icon"
+              onDeleted={() => {
+                if (inQueue && onNext && !isLast) {
+                  onNext();
+                }
+              }}
             />
           </div>
 
@@ -457,6 +478,32 @@ const MetadataMatcher: React.FC<MetadataMatcherProps> = ({
             })
             )}
           </div>
+
+          {inQueue && (
+            <div className="p-3 border-t border-[#2a2a35] bg-[#15151a] flex items-center justify-between shrink-0">
+              <span className="text-xs font-semibold text-gray-400">
+                Queue: <span className="text-[#60a5fa]">{queuePosition}</span> / {queueTotal}
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={onPrev}
+                  disabled={isFirst || !onPrev}
+                  className="px-3 py-1.5 rounded bg-[#2a2a35] hover:bg-[#3a3a45] text-gray-300 text-xs font-medium disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                >
+                  &larr; Previous
+                </button>
+                <button
+                  type="button"
+                  onClick={onNext}
+                  disabled={isLast || !onNext}
+                  className="px-3 py-1.5 rounded bg-[#60a5fa] hover:bg-[#3b82f6] text-white text-xs font-medium disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                >
+                  Next &rarr;
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -467,8 +514,13 @@ const MetadataMatcher: React.FC<MetadataMatcherProps> = ({
           onClose={() => setShowCustomModal(false)}
           onSaved={() => {
             setShowCustomModal(false);
-            if (onMatchSelected) onMatchSelected(0);
-            else window.location.reload();
+            if (inQueue && onNext && !isLast) {
+              onNext();
+            } else if (onMatchSelected) {
+              onMatchSelected(0);
+            } else {
+              window.location.reload();
+            }
           }}
         />
       )}

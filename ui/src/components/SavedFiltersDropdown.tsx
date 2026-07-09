@@ -9,11 +9,15 @@ import {
 
 interface SavedFiltersDropdownProps {
   currentQuery: string;
-  onLoadFilter: (query: string) => void;
+  currentSortBy: string;
+  currentSortOrder: string;
+  onLoadFilter: (query: string, sortBy: string, sortOrder: string) => void;
 }
 
 const SavedFiltersDropdown: React.FC<SavedFiltersDropdownProps> = ({
   currentQuery,
+  currentSortBy,
+  currentSortOrder,
   onLoadFilter,
 }) => {
   const [filters, setFilters] = useState<SavedFilter[]>([]);
@@ -60,7 +64,7 @@ const SavedFiltersDropdown: React.FC<SavedFiltersDropdownProps> = ({
 
   const handleSelect = (filter: SavedFilter) => {
     setActiveFilterId(filter.id);
-    onLoadFilter(filter.query);
+    onLoadFilter(filter.query || '', filter.sort_by || 'none', filter.sort_order || 'desc');
     setIsOpen(false);
     setIsNaming(false);
     setError(null);
@@ -72,7 +76,7 @@ const SavedFiltersDropdown: React.FC<SavedFiltersDropdownProps> = ({
 
     try {
       setError(null);
-      const created = await createSavedFilter(trimmed, currentQuery);
+      const created = await createSavedFilter(trimmed, currentQuery, currentSortBy, currentSortOrder);
       setFilters((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
       setActiveFilterId(created.id);
       setIsNaming(false);
@@ -86,7 +90,13 @@ const SavedFiltersDropdown: React.FC<SavedFiltersDropdownProps> = ({
     e.stopPropagation();
     try {
       setError(null);
-      const updated = await updateSavedFilter(filter.id, filter.name, currentQuery);
+      const updated = await updateSavedFilter(
+        filter.id,
+        filter.name,
+        currentQuery,
+        currentSortBy,
+        currentSortOrder,
+      );
       setFilters((prev) => prev.map((f) => (f.id === updated.id ? updated : f)));
       setActiveFilterId(updated.id);
     } catch (err: any) {
@@ -302,8 +312,8 @@ const SavedFiltersDropdown: React.FC<SavedFiltersDropdownProps> = ({
               <button
                 type="button"
                 onClick={() => setIsNaming(true)}
-                disabled={!currentQuery.trim()}
-                className="w-full text-xs text-[#60a5fa] hover:text-[#93c5fd] transition-colors py-1 disabled:text-gray-600 disabled:cursor-not-allowed"
+                disabled={!currentQuery.trim() && currentSortBy === 'none'}
+                className="w-full text-xs text-[#60a5fa] hover:text-[#93c5fd] transition-colors py-1 disabled:text-gray-600 disabled:cursor-not-allowed cursor-pointer"
               >
                 + Save current filters
               </button>

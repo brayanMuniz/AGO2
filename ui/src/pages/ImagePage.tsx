@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { updateFavorite } from '../api/images';
 import DeleteImageButton from '../components/DeleteImageButton';
 import DuplicateImageNotice from '../components/DuplicateImageNotice';
@@ -41,11 +41,60 @@ const TagCategory = ({
 
 const ImagePage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const [imageData, setImageData] = useState<ImageData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showMatcher, setShowMatcher] = useState(false);
   const [showCustomModal, setShowCustomModal] = useState(false);
+  const [queueIds, setQueueIds] = useState<number[]>([]);
+
+  useEffect(() => {
+    try {
+      const saved = sessionStorage.getItem('ago_queue');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed.ids)) {
+          setQueueIds(parsed.ids);
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }, [id]);
+
+  const currentIndex = queueIds.indexOf(Number(id));
+  const inQueue = currentIndex !== -1 && queueIds.length > 0;
+  const isFirst = currentIndex <= 0;
+  const isLast = currentIndex >= queueIds.length - 1;
+  const prevId = !isFirst ? queueIds[currentIndex - 1] : null;
+  const nextId = !isLast ? queueIds[currentIndex + 1] : null;
+
+  const goToPrev = useCallback(() => {
+    if (prevId) {
+      navigate(`/image/${prevId}?queue=true`);
+    }
+  }, [prevId, navigate]);
+
+  const goToNext = useCallback(() => {
+    if (nextId) {
+      navigate(`/image/${nextId}?queue=true`);
+    }
+  }, [nextId, navigate]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (e.key === 'ArrowLeft') {
+        goToPrev();
+      } else if (e.key === 'ArrowRight') {
+        goToNext();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [goToPrev, goToNext]);
 
   const fetchImage = useCallback(async () => {
     setLoading(true);
@@ -98,7 +147,7 @@ const ImagePage: React.FC = () => {
       <div className="min-h-screen bg-[#111115] text-white flex flex-col">
         <TopBar />
         <div className="flex-1 flex items-center justify-center">
-          <span className="text-gray-400 text-lg">Loading...</span>
+          <span className="text-gray-400">Loading image...</span>
         </div>
       </div>
     );
@@ -124,6 +173,11 @@ const ImagePage: React.FC = () => {
           hash={imageData.hash}
           imageId={imageData.id}
           originalImageId={imageData.has_duplicate}
+          inQueue={inQueue}
+          isFirst={isFirst}
+          isLast={isLast}
+          onPrev={goToPrev}
+          onNext={goToNext}
         />
       );
     }
@@ -134,6 +188,13 @@ const ImagePage: React.FC = () => {
         fileName={imageData.file_name}
         fileSize={imageData.file_size}
         onMatchSelected={fetchImage}
+        inQueue={inQueue}
+        isFirst={isFirst}
+        isLast={isLast}
+        queuePosition={currentIndex + 1}
+        queueTotal={queueIds.length}
+        onPrev={goToPrev}
+        onNext={goToNext}
       />
     );
   }
@@ -150,6 +211,13 @@ const ImagePage: React.FC = () => {
           setShowMatcher(false);
           fetchImage();
         }}
+        inQueue={inQueue}
+        isFirst={isFirst}
+        isLast={isLast}
+        queuePosition={currentIndex + 1}
+        queueTotal={queueIds.length}
+        onPrev={goToPrev}
+        onNext={goToNext}
       />
     );
   }
@@ -196,6 +264,11 @@ const ImagePage: React.FC = () => {
                 imageId={imageData.id}
                 redirectTo="/"
                 variant="icon"
+                onDeleted={() => {
+                  if (inQueue && nextId) {
+                    goToNext();
+                  }
+                }}
               />
             </div>
           </div>
@@ -250,7 +323,7 @@ const ImagePage: React.FC = () => {
           </div>
         </aside>
 
-        <main className="flex-1 flex items-center justify-center p-4 overflow-hidden min-h-0">
+        <main className="flex-1 flex items-center justify-center p-4 overflow-hidden min-h-0 relative">
           <div className="relative w-full h-full flex items-center justify-center border-2 border-gray-600 rounded-[2rem] p-2">
             <img
               src={`/images/${imageData.file_name}?v=${imageData.file_size || ''}`}
@@ -266,6 +339,30 @@ const ImagePage: React.FC = () => {
               }}
             />
           </div>
+
+          {inQueue && (
+            <div className="absolute bottom-8 right-8 z-20 flex items-center gap-2 bg-[#15151a]/95 backdrop-blur border border-[#2a2a35] px-4 py-2.5 rounded-xl shadow-2xl">
+              <span className="text-xs font-semibold text-gray-400 mr-2">
+                Queue: <span className="text-[#60a5fa]">{currentIndex + 1}</span> / {queueIds.length}
+              </span>
+              <button
+                type="button"
+                onClick={goToPrev}
+                disabled={isFirst}
+                className="px-3 py-1.5 rounded-lg bg-[#2a2a35] hover:bg-[#3a3a45] text-gray-200 text-xs font-medium disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer flex items-center gap-1"
+              >
+                &larr; Previous
+              </button>
+              <button
+                type="button"
+                onClick={goToNext}
+                disabled={isLast}
+                className="px-3 py-1.5 rounded-lg bg-[#60a5fa] hover:bg-[#3b82f6] text-white text-xs font-medium disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer flex items-center gap-1"
+              >
+                Next &rarr;
+              </button>
+            </div>
+          )}
         </main>
       </div>
 

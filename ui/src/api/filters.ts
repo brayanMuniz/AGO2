@@ -2,6 +2,8 @@ export interface SavedFilter {
   id: number;
   name: string;
   query: string;
+  sort_by: string;
+  sort_order: string;
   created_at: string;
   updated_at: string;
 }
@@ -12,11 +14,16 @@ export async function getSavedFilters(): Promise<SavedFilter[]> {
   return response.json();
 }
 
-export async function createSavedFilter(name: string, query: string): Promise<SavedFilter> {
+export async function createSavedFilter(
+  name: string,
+  query: string,
+  sortBy: string,
+  sortOrder: string,
+): Promise<SavedFilter> {
   const response = await fetch('/api/filters', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, query }),
+    body: JSON.stringify({ name, query, sort_by: sortBy, sort_order: sortOrder }),
   });
   if (!response.ok) {
     const err = await response.json().catch(() => ({}));
@@ -25,11 +32,17 @@ export async function createSavedFilter(name: string, query: string): Promise<Sa
   return response.json();
 }
 
-export async function updateSavedFilter(id: number, name: string, query: string): Promise<SavedFilter> {
+export async function updateSavedFilter(
+  id: number,
+  name: string,
+  query: string,
+  sortBy: string,
+  sortOrder: string,
+): Promise<SavedFilter> {
   const response = await fetch(`/api/filters/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, query }),
+    body: JSON.stringify({ name, query, sort_by: sortBy, sort_order: sortOrder }),
   });
   if (!response.ok) {
     const err = await response.json().catch(() => ({}));

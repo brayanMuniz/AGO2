@@ -753,8 +753,10 @@ func (a *App) handleGetSavedFilters(w http.ResponseWriter, r *http.Request) {
 // POST /api/filters
 func (a *App) handleCreateSavedFilter(w http.ResponseWriter, r *http.Request) {
 	var reqBody struct {
-		Name  string `json:"name"`
-		Query string `json:"query"`
+		Name      string `json:"name"`
+		Query     string `json:"query"`
+		SortBy    string `json:"sort_by"`
+		SortOrder string `json:"sort_order"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
@@ -767,7 +769,7 @@ func (a *App) handleCreateSavedFilter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	filter, err := CreateSavedFilter(a.DB, strings.TrimSpace(reqBody.Name), reqBody.Query)
+	filter, err := CreateSavedFilter(a.DB, strings.TrimSpace(reqBody.Name), reqBody.Query, reqBody.SortBy, reqBody.SortOrder)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint") {
 			sendJSONError(w, fmt.Sprintf("A filter named '%s' already exists", reqBody.Name), http.StatusConflict)
@@ -793,8 +795,10 @@ func (a *App) handleUpdateSavedFilter(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var reqBody struct {
-		Name  string `json:"name"`
-		Query string `json:"query"`
+		Name      string `json:"name"`
+		Query     string `json:"query"`
+		SortBy    string `json:"sort_by"`
+		SortOrder string `json:"sort_order"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
@@ -807,7 +811,7 @@ func (a *App) handleUpdateSavedFilter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	filter, err := UpdateSavedFilter(a.DB, id, strings.TrimSpace(reqBody.Name), reqBody.Query)
+	filter, err := UpdateSavedFilter(a.DB, id, strings.TrimSpace(reqBody.Name), reqBody.Query, reqBody.SortBy, reqBody.SortOrder)
 	if err != nil {
 		sendJSONError(w, "Failed to update saved filter", http.StatusInternalServerError)
 		fmt.Printf("Error updating saved filter %d: %v\n", id, err)

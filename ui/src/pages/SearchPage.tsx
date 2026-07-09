@@ -164,8 +164,12 @@ const SearchPage: React.FC = () => {
 
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({});
 
-  const [sortBy, setSortBy] = useState<'none' | 'created_at' | 'file_size' | 'dimensions'>('none');
-  const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc');
+  const urlSort = (searchParams.get('sort') as any) || 'none';
+  const urlOrder = (searchParams.get('order') as any) || 'desc';
+
+  const [sortBy, setSortBy] = useState<string>(urlSort);
+  const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>(urlOrder);
+  const [randomSeed, setRandomSeed] = useState(() => Math.random());
 
   const [brightness, setBrightness] = useState<[number, number]>([0, 255]);
   const [color, setColor] = useState<string>('#000000');
@@ -177,6 +181,19 @@ const SearchPage: React.FC = () => {
 
   const isMissing = /(?:^|\s)is:missing(?:\s|$)/.test(tagsQuery);
   const isDuplicate = /(?:^|\s)is:duplicate(?:\s|$)/.test(tagsQuery);
+
+  const updateUrlParams = (newTags?: string, newSort?: string, newOrder?: string) => {
+    const t = newTags !== undefined ? newTags : tagsQuery;
+    const s = newSort !== undefined ? newSort : sortBy;
+    const o = newOrder !== undefined ? newOrder : sortOrder;
+    const params: Record<string, string> = {};
+    if (t) params.tags = t;
+    if (s && s !== 'none') {
+      params.sort = s;
+      if (o) params.order = o;
+    }
+    setSearchParams(params);
+  };
 
   useEffect(() => {
     setFilters(parseSearchQuery(tagsQuery));
@@ -270,11 +287,7 @@ const SearchPage: React.FC = () => {
 
     const updateUrl = () => {
       const query = buildSearchQuery(nextFilters);
-      if (query) {
-        setSearchParams({ tags: query });
-      } else {
-        setSearchParams({});
-      }
+      updateUrlParams(query);
     };
 
     if (immediate) {
@@ -297,7 +310,7 @@ const SearchPage: React.FC = () => {
 
     if (debounceRef.current) window.clearTimeout(debounceRef.current);
     debounceRef.current = window.setTimeout(() => {
-      setSearchParams(newQuery ? { tags: newQuery } : {});
+      updateUrlParams(newQuery);
     }, 350);
   };
 
@@ -311,7 +324,7 @@ const SearchPage: React.FC = () => {
     const newQuery = tokens.join(' ');
     if (debounceRef.current) window.clearTimeout(debounceRef.current);
     debounceRef.current = window.setTimeout(() => {
-      setSearchParams(newQuery ? { tags: newQuery } : {});
+      updateUrlParams(newQuery);
     }, 350);
   };
 
@@ -434,6 +447,12 @@ const SearchPage: React.FC = () => {
     }
 
     return [...images].sort((a, b) => {
+      if (sortBy === 'random') {
+        const hashA = Math.sin(a.id * 9999 + randomSeed * 100000);
+        const hashB = Math.sin(b.id * 9999 + randomSeed * 100000);
+        return hashA - hashB;
+      }
+
       let valA = 0;
       let valB = 0;
 
@@ -451,13 +470,26 @@ const SearchPage: React.FC = () => {
       } else if (sortBy === 'created_at') {
         valA = (a as any).created_at ? new Date((a as any).created_at).getTime() : a.id;
         valB = (b as any).created_at ? new Date((b as any).created_at).getTime() : b.id;
+      } else if (sortBy === 'id') {
+        valA = a.id;
+        valB = b.id;
+      } else if (sortBy === 'rating') {
+        const ratingOrder: Record<string, number> = { g: 1, s: 2, q: 3, e: 4 };
+        valA = ratingOrder[a.main_data?.rating || 'g'] || 0;
+        valB = ratingOrder[b.main_data?.rating || 'g'] || 0;
       }
 
       if (valA < valB) return sortOrder === 'asc' ? -1 : 1;
       if (valA > valB) return sortOrder === 'asc' ? 1 : -1;
       return 0;
     });
-  }, [images, sortBy, sortOrder]);
+  }, [images, sortBy, sortOrder, randomSeed]);
+
+  const startQueue = () => {
+    if (sortedImages.length === 0) return;
+    const ids = sortedImages.map((img) => img.id);
+    sessionStorage.setItem('ago_queue', JSON.stringify({ ids }));
+  };
 
   const renderTagList = (tags: TagCount[], category: TagCategory) => {
     if (!tags.length) return null;
@@ -645,12 +677,12 @@ const SearchPage: React.FC = () => {
             <div className="flex items-center gap-2 pr-4 border-r border-[#2a2a35]">
               <SavedFiltersDropdown
                 currentQuery={tagsQuery}
-                onLoadFilter={(query) => {
-                  if (query) {
-                    setSearchParams({ tags: query });
-                  } else {
-                    setSearchParams({});
-                  }
+                currentSortBy={sortBy}
+                currentSortOrder={sortOrder}
+                onLoadFilter={(query, newSortBy, newSortOrder) => {
+                  setSortBy(newSortBy as any);
+                  setSortOrder(newSortOrder as any);
+                  updateUrlParams(query, newSortBy, newSortOrder);
                 }}
               />
             </div>
@@ -659,31 +691,68 @@ const SearchPage: React.FC = () => {
               <span className="text-gray-500 font-medium">Sort by:</span>
               <select
                 value={sortBy}
-                onChange={(e) => setSortBy(e.target.value as 'none' | 'created_at' | 'file_size' | 'dimensions')}
+                onChange={(e) => {
+                  const val = e.target.value as any;
+                  setSortBy(val);
+                  updateUrlParams(undefined, val, sortOrder);
+                }}
                 className="bg-[#1c1c24] border border-[#2a2a35] text-gray-300 rounded px-2 py-1.5 outline-none focus:border-[#60a5fa] transition-colors cursor-pointer"
               >
                 <option value="none">None (Default)</option>
                 <option value="created_at">Date Added</option>
+                <option value="id">File ID</option>
                 <option value="file_size">File Size</option>
                 <option value="dimensions">Dimensions</option>
+                <option value="rating">Rating</option>
+                <option value="random">Random (Shuffle)</option>
               </select>
               <button
                 type="button"
-                onClick={() => setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
+                onClick={() => {
+                  if (sortBy === 'random') {
+                    setRandomSeed(Math.random());
+                  } else {
+                    const val = sortOrder === 'asc' ? 'desc' : 'asc';
+                    setSortOrder(val);
+                    updateUrlParams(undefined, sortBy, val);
+                  }
+                }}
                 disabled={sortBy === 'none'}
                 className={`w-7 h-7 flex items-center justify-center border rounded transition-colors ${sortBy === 'none'
                   ? 'bg-[#15151a] border-[#2a2a35] text-gray-600 cursor-not-allowed'
                   : 'bg-[#1c1c24] border-[#2a2a35] hover:border-[#60a5fa] hover:text-[#60a5fa] text-gray-300 cursor-pointer'
                   }`}
-                title={sortBy === 'none' ? 'Sorting disabled' : sortOrder === 'asc' ? 'Ascending' : 'Descending'}
+                title={
+                  sortBy === 'none'
+                    ? 'Sorting disabled'
+                    : sortBy === 'random'
+                      ? 'Reshuffle queue order'
+                      : sortOrder === 'asc'
+                        ? 'Ascending'
+                        : 'Descending'
+                }
               >
-                {sortOrder === 'asc' ? '↑' : '↓'}
+                {sortBy === 'random' ? '🔀' : sortOrder === 'asc' ? '↑' : '↓'}
               </button>
             </div>
 
             <span className="text-gray-400">{images.length} result(s)</span>
 
             <div className="ml-auto flex items-center gap-2">
+              {sortedImages.length > 0 && !selectionMode && (
+                <Link
+                  to={`/image/${sortedImages[0].id}?queue=true`}
+                  onClick={startQueue}
+                  className="px-2.5 py-1.5 rounded border border-[#60a5fa]/60 text-[#60a5fa] bg-[#60a5fa]/10 hover:bg-[#60a5fa]/20 transition-colors flex items-center gap-1.5 text-xs font-medium cursor-pointer"
+                  title="Start Queue with current search & sort results"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
+                    <path d="M6.3 2.841A1.5 1.5 0 004 4.11V15.89a1.5 1.5 0 002.3 1.269l9.344-5.89a1.5 1.5 0 000-2.538L6.3 2.84z" />
+                  </svg>
+                  <span>Start Queue</span>
+                </Link>
+              )}
+
               {selectionMode && (
                 <button
                   type="button"
@@ -756,11 +825,13 @@ const SearchPage: React.FC = () => {
                   return (
                     <div key={img.id} className="relative group">
                       <Link
-                        to={selectionMode ? '#' : `/image/${img.id}`}
+                        to={selectionMode ? '#' : `/image/${img.id}?queue=true`}
                         onClick={(event) => {
                           if (selectionMode) {
                             event.preventDefault();
                             if (!isDeleting) toggleSelected(img.id);
+                          } else {
+                            startQueue();
                           }
                         }}
                         className={`block relative rounded transition-all duration-200 ${selectionMode && isSelected

@@ -114,6 +114,8 @@ func createTables(db *sql.DB) error {
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		name TEXT NOT NULL UNIQUE,
 		query TEXT NOT NULL,
+		sort_by TEXT DEFAULT 'none',
+		sort_order TEXT DEFAULT 'desc',
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
@@ -132,12 +134,14 @@ type SavedFilter struct {
 	ID        int64  `json:"id"`
 	Name      string `json:"name"`
 	Query     string `json:"query"`
+	SortBy    string `json:"sort_by"`
+	SortOrder string `json:"sort_order"`
 	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
 }
 
 func GetAllSavedFilters(db *sql.DB) ([]SavedFilter, error) {
-	rows, err := db.Query("SELECT id, name, query, created_at, updated_at FROM saved_filters ORDER BY name ASC")
+	rows, err := db.Query("SELECT id, name, query, COALESCE(sort_by, 'none'), COALESCE(sort_order, 'desc'), created_at, updated_at FROM saved_filters ORDER BY name ASC")
 	if err != nil {
 		return nil, fmt.Errorf("failed to query saved filters: %w", err)
 	}
@@ -146,7 +150,7 @@ func GetAllSavedFilters(db *sql.DB) ([]SavedFilter, error) {
 	var filters []SavedFilter
 	for rows.Next() {
 		var f SavedFilter
-		if err := rows.Scan(&f.ID, &f.Name, &f.Query, &f.CreatedAt, &f.UpdatedAt); err != nil {
+		if err := rows.Scan(&f.ID, &f.Name, &f.Query, &f.SortBy, &f.SortOrder, &f.CreatedAt, &f.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan saved filter: %w", err)
 		}
 		filters = append(filters, f)
@@ -154,9 +158,15 @@ func GetAllSavedFilters(db *sql.DB) ([]SavedFilter, error) {
 	return filters, rows.Err()
 }
 
-func CreateSavedFilter(db *sql.DB, name, query string) (*SavedFilter, error) {
+func CreateSavedFilter(db *sql.DB, name, query, sortBy, sortOrder string) (*SavedFilter, error) {
+	if sortBy == "" {
+		sortBy = "none"
+	}
+	if sortOrder == "" {
+		sortOrder = "desc"
+	}
 	result, err := db.Exec(
-		"INSERT INTO saved_filters (name, query) VALUES (?, ?)", name, query,
+		"INSERT INTO saved_filters (name, query, sort_by, sort_order) VALUES (?, ?, ?, ?)", name, query, sortBy, sortOrder,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create saved filter: %w", err)
@@ -164,26 +174,32 @@ func CreateSavedFilter(db *sql.DB, name, query string) (*SavedFilter, error) {
 	id, _ := result.LastInsertId()
 
 	var f SavedFilter
-	err = db.QueryRow("SELECT id, name, query, created_at, updated_at FROM saved_filters WHERE id = ?", id).
-		Scan(&f.ID, &f.Name, &f.Query, &f.CreatedAt, &f.UpdatedAt)
+	err = db.QueryRow("SELECT id, name, query, COALESCE(sort_by, 'none'), COALESCE(sort_order, 'desc'), created_at, updated_at FROM saved_filters WHERE id = ?", id).
+		Scan(&f.ID, &f.Name, &f.Query, &f.SortBy, &f.SortOrder, &f.CreatedAt, &f.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch created filter: %w", err)
 	}
 	return &f, nil
 }
 
-func UpdateSavedFilter(db *sql.DB, id int64, name, query string) (*SavedFilter, error) {
+func UpdateSavedFilter(db *sql.DB, id int64, name, query, sortBy, sortOrder string) (*SavedFilter, error) {
+	if sortBy == "" {
+		sortBy = "none"
+	}
+	if sortOrder == "" {
+		sortOrder = "desc"
+	}
 	_, err := db.Exec(
-		"UPDATE saved_filters SET name = ?, query = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-		name, query, id,
+		"UPDATE saved_filters SET name = ?, query = ?, sort_by = ?, sort_order = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+		name, query, sortBy, sortOrder, id,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update saved filter: %w", err)
 	}
 
 	var f SavedFilter
-	err = db.QueryRow("SELECT id, name, query, created_at, updated_at FROM saved_filters WHERE id = ?", id).
-		Scan(&f.ID, &f.Name, &f.Query, &f.CreatedAt, &f.UpdatedAt)
+	err = db.QueryRow("SELECT id, name, query, COALESCE(sort_by, 'none'), COALESCE(sort_order, 'desc'), created_at, updated_at FROM saved_filters WHERE id = ?", id).
+		Scan(&f.ID, &f.Name, &f.Query, &f.SortBy, &f.SortOrder, &f.CreatedAt, &f.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch updated filter: %w", err)
 	}

@@ -8,6 +8,11 @@ interface DuplicateImageNoticeProps {
   hash: string;
   imageId: number;
   originalImageId?: number;
+  inQueue?: boolean;
+  isFirst?: boolean;
+  isLast?: boolean;
+  onPrev?: () => void;
+  onNext?: () => void;
 }
 
 const DuplicateImageNotice: React.FC<DuplicateImageNoticeProps> = ({
@@ -15,6 +20,11 @@ const DuplicateImageNotice: React.FC<DuplicateImageNoticeProps> = ({
   hash,
   imageId,
   originalImageId,
+  inQueue,
+  isFirst,
+  isLast,
+  onPrev,
+  onNext,
 }) => {
   return (
     <div className="min-h-screen bg-[#0e0e12] flex flex-col text-gray-300 font-sans">
@@ -79,8 +89,37 @@ const DuplicateImageNotice: React.FC<DuplicateImageNoticeProps> = ({
             >
               Back to home
             </Link>
-            <DeleteImageButton imageId={imageId} redirectTo="/" />
+            <DeleteImageButton
+              imageId={imageId}
+              redirectTo="/"
+              onDeleted={() => {
+                if (inQueue && onNext && !isLast) {
+                  onNext();
+                }
+              }}
+            />
           </div>
+
+          {inQueue && (
+            <div className="mt-6 pt-4 border-t border-[#2a2a35] flex items-center justify-center gap-3">
+              <button
+                type="button"
+                onClick={onPrev}
+                disabled={isFirst}
+                className="px-4 py-1.5 rounded-lg bg-[#2a2a35] hover:bg-[#3a3a45] text-gray-300 text-xs font-medium disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+              >
+                &larr; Previous
+              </button>
+              <button
+                type="button"
+                onClick={onNext}
+                disabled={isLast}
+                className="px-4 py-1.5 rounded-lg bg-[#60a5fa] hover:bg-[#3b82f6] text-white text-xs font-medium disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+              >
+                Next &rarr;
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>
