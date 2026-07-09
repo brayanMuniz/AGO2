@@ -3,6 +3,7 @@ import { useSearchParams, Link } from 'react-router-dom';
 import { updateFavorite } from '../api/images';
 import ExportAlbumModal from '../components/ExportAlbumModal';
 import FavoriteStar from '../components/FavoriteStar';
+import SavedFiltersDropdown from '../components/SavedFiltersDropdown';
 import SearchAutocomplete from '../components/SearchAutocomplete';
 import SearchFiltersPanel from '../components/SearchFiltersPanel';
 import SearchTagPills from '../components/SearchTagPills';
@@ -641,6 +642,19 @@ const SearchPage: React.FC = () => {
 
         <main className="flex-1 flex flex-col overflow-hidden">
           <div className="h-12 border-b border-[#2a2a35] flex items-center px-4 shrink-0 gap-4 text-xs">
+            <div className="flex items-center gap-2 pr-4 border-r border-[#2a2a35]">
+              <SavedFiltersDropdown
+                currentQuery={tagsQuery}
+                onLoadFilter={(query) => {
+                  if (query) {
+                    setSearchParams({ tags: query });
+                  } else {
+                    setSearchParams({});
+                  }
+                }}
+              />
+            </div>
+
             <div className="flex items-center gap-2 pr-4 border-r border-[#2a2a35]">
               <span className="text-gray-500 font-medium">Sort by:</span>
               <select

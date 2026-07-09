@@ -58,14 +58,19 @@ func main() {
 	http.HandleFunc("GET /api/process-gallery/status", app.handleGetJobStatus)
 	http.HandleFunc("GET /api/proxy-image", ProxyImageHandler)
 	http.HandleFunc("GET /api/tags/autocomplete", app.handleTagAutocomplete)
+	http.HandleFunc("GET /api/filters", app.handleGetSavedFilters)
 
 	http.HandleFunc("POST /api/process-gallery", app.handleProcessGallery)
 	http.HandleFunc("POST /api/album/export", app.handleExportAlbum)
 	http.HandleFunc("POST /api/image/batch-delete", app.handleBatchDeleteImages)
+	http.HandleFunc("POST /api/filters", app.handleCreateSavedFilter)
 
 	http.HandleFunc("PATCH /api/image/{id}", app.handleImageUpdate)
 
+	http.HandleFunc("PUT /api/filters/{id}", app.handleUpdateSavedFilter)
+
 	http.HandleFunc("DELETE /api/image/{id}", app.handleDeleteImage)
+	http.HandleFunc("DELETE /api/filters/{id}", app.handleDeleteSavedFilter)
 
 	port := ":8080"
 	fmt.Printf("Server is running on http://localhost%s\n", port)
