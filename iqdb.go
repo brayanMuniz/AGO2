@@ -73,6 +73,9 @@ type Post struct {
 	ImageWidth  int    `json:"image_width"`
 	FileSize    int    `json:"file_size"`
 
+	OriginalPostID string `json:"original_post_id,omitempty"`
+	OriginalSource string `json:"original_source,omitempty"`
+
 	TagsArtist     []string `json:"tags_artist"`
 	TagsCharacters []string `json:"tags_character"`
 	TagsCopyright  []string `json:"tags_copyright"`

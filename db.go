@@ -50,6 +50,7 @@ func createTables(db *sql.DB) error {
 		active_metadata_id INTEGER,
 		hasDuplicate INTEGER DEFAULT NULL,
 		isFavorite BOOLEAN DEFAULT FALSE,
+		organized BOOLEAN DEFAULT FALSE,
 		thumbnail_path TEXT DEFAULT NULL,
 		image_height INTEGER DEFAULT 0,
 		image_width INTEGER DEFAULT 0,
@@ -75,6 +76,10 @@ func createTables(db *sql.DB) error {
 		large_file_url TEXT,
 		rating TEXT,
 		source TEXT,
+
+		-- ORIGINAL SOURCE REFERENCE (populated when customizing a danbooru match)
+		original_post_id TEXT DEFAULT NULL,
+		original_source TEXT DEFAULT NULL,
 		
 		FOREIGN KEY (filename) REFERENCES files (filename) ON DELETE CASCADE ON UPDATE CASCADE
 	);
@@ -107,8 +112,8 @@ func createTables(db *sql.DB) error {
 	-- Index for faster lookups when we doing math on colors columns
 	CREATE INDEX IF NOT EXISTS idx_image_colors_rgb ON image_colors(r, g, b);
 
-	-- Speeds up "Missing Data" and "Duplicate" queries
-	CREATE INDEX IF NOT EXISTS idx_files_status ON files(active_metadata_id, hasDuplicate);
+	-- Speeds up "Missing Data", "Duplicate", and "Organized" queries
+	CREATE INDEX IF NOT EXISTS idx_files_status ON files(active_metadata_id, hasDuplicate, organized);
 	`
 	_, err := db.Exec(schema)
 	return err
@@ -310,7 +315,7 @@ func ProcessNewImageUpload(db *sql.DB, apiKey, userName, filename, filePath stri
 		saveTags(db, recordID, bestMatch.Post.TagsGeneral, "general")
 		saveTags(db, recordID, bestMatch.Post.TagsMeta, "meta")
 
-		_, err = db.Exec("UPDATE files SET active_metadata_id = ? WHERE filename = ?", recordID, filename)
+		_, err = db.Exec("UPDATE files SET active_metadata_id = ?, organized = TRUE WHERE filename = ?", recordID, filename)
 		if err != nil {
 			return result, fmt.Errorf("failed to lock in active metadata: %w", err)
 		}
@@ -428,8 +433,8 @@ func GetImageByID(db *sql.DB, fileID int64, includeMatches bool) (*Image, error)
 	var hasDuplicate sql.NullInt64
 	img.ID = fileID
 
-	err := db.QueryRow("SELECT filename, hash, isFavorite, active_metadata_id, IFNULL(thumbnail_path, ''), hasDuplicate, image_width, image_height, file_size FROM files WHERE id = ?", fileID).
-		Scan(&img.FileName, &img.Hash, &img.IsFavorite, &activeMetadataID, &img.ThumbnailPath, &hasDuplicate, &img.ImageWidth, &img.ImageHeight, &img.FileSize)
+	err := db.QueryRow("SELECT filename, hash, isFavorite, organized, active_metadata_id, IFNULL(thumbnail_path, ''), hasDuplicate, image_width, image_height, file_size FROM files WHERE id = ?", fileID).
+		Scan(&img.FileName, &img.Hash, &img.IsFavorite, &img.Organized, &activeMetadataID, &img.ThumbnailPath, &hasDuplicate, &img.ImageWidth, &img.ImageHeight, &img.FileSize)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("no file found with ID %d", fileID)
@@ -447,7 +452,8 @@ func GetImageByID(db *sql.DB, fileID int64, includeMatches bool) (*Image, error)
 	}
 
 	query := `
-	    SELECT id, provider_id, score, file_url, large_file_url, rating, source 
+	    SELECT id, provider_id, score, file_url, large_file_url, rating, source,
+	           IFNULL(original_post_id, ''), IFNULL(original_source, '')
 	    FROM metadata_records 
 	    WHERE id = ?`
 
@@ -467,7 +473,7 @@ func GetImageByID(db *sql.DB, fileID int64, includeMatches bool) (*Image, error)
 
 		err := rows.Scan(
 			&recordID, &providerID, &score, &fileURL, &largeFileURL, &rating,
-			&source,
+			&source, &post.OriginalPostID, &post.OriginalSource,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan metadata row: %w", err)
@@ -649,6 +655,10 @@ func SearchImagesByTags(db *sql.DB, searchTokens []string) ([]Image, error) {
 			whereClauses = append(whereClauses, "f.active_metadata_id IS NULL AND f.hasDuplicate IS NULL")
 		} else if lowerToken == "is:duplicate" {
 			whereClauses = append(whereClauses, "f.hasDuplicate IS NOT NULL")
+		} else if lowerToken == "is:organized" {
+			whereClauses = append(whereClauses, "f.organized = TRUE")
+		} else if lowerToken == "is:unorganized" {
+			whereClauses = append(whereClauses, "f.organized = FALSE")
 		} else {
 			normalTags = append(normalTags, strings.TrimSpace(token))
 		}
@@ -798,10 +808,34 @@ func UpdateImage(db *sql.DB, fileID int64, params UpdateImageParams) error {
 			providerName = "custom"
 		}
 
+		// Look up the current active metadata to preserve original source reference
+		var origPostID, origSource sql.NullString
+		if providerName == "custom" {
+			// If this file already had danbooru metadata, capture it as the original reference
+			row := db.QueryRow(`
+				SELECT m.provider_id, m.source, m.original_post_id, m.original_source
+				FROM files f
+				JOIN metadata_records m ON f.active_metadata_id = m.id
+				WHERE f.id = ?`, fileID)
+
+			var prevProviderID, prevSource, prevOrigPostID, prevOrigSource sql.NullString
+			if err := row.Scan(&prevProviderID, &prevSource, &prevOrigPostID, &prevOrigSource); err == nil {
+				if prevOrigPostID.Valid && prevOrigPostID.String != "" {
+					// Already customized before — carry forward the existing original reference
+					origPostID = prevOrigPostID
+					origSource = prevOrigSource
+				} else if prevProviderID.Valid && prevProviderID.String != "" && prevProviderID.String != "0" {
+					// First customization of a danbooru match — snapshot the current provider data
+					origPostID = prevProviderID
+					origSource = prevSource
+				}
+			}
+		}
+
 		query := `
 			INSERT INTO metadata_records 
-			(filename, provider_name, provider_id, score, file_url, large_file_url, rating, source)
-			VALUES (?, ?, ?, 100.0, ?, ?, ?, ?)
+			(filename, provider_name, provider_id, score, file_url, large_file_url, rating, source, original_post_id, original_source)
+			VALUES (?, ?, ?, 100.0, ?, ?, ?, ?, ?, ?)
 		`
 
 		execRes, err := db.Exec(query,
@@ -812,6 +846,8 @@ func UpdateImage(db *sql.DB, fileID int64, params UpdateImageParams) error {
 			post.LargeFileURL,
 			post.Rating,
 			post.Source,
+			origPostID,
+			origSource,
 		)
 		if err != nil {
 			return fmt.Errorf("failed to insert metadata record: %w", err)
@@ -827,8 +863,8 @@ func UpdateImage(db *sql.DB, fileID int64, params UpdateImageParams) error {
 		saveTags(db, newRecordID, post.TagsGeneral, "general")
 		saveTags(db, newRecordID, post.TagsMeta, "meta")
 
-		// Tell the files table to use this new internal ID
-		setClauses = append(setClauses, "active_metadata_id = ?")
+		// Tell the files table to use this new internal ID and mark as organized
+		setClauses = append(setClauses, "active_metadata_id = ?", "organized = TRUE")
 		args = append(args, newRecordID)
 
 	} else if params.ActiveMetadataID != nil {

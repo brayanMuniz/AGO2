@@ -31,6 +31,7 @@ type Image struct {
 	ID            int64  `json:"id"`
 	FileName      string `json:"file_name"`
 	IsFavorite    bool   `json:"is_favorite"`
+	Organized     bool   `json:"organized"`
 	HasDuplicate  *int64 `json:"has_duplicate,omitempty"`
 	Hash          string `json:"hash"`
 	MainData      *Post  `json:"main_data"`

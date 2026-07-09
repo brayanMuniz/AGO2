@@ -16,6 +16,8 @@ export interface Post {
   tag_count_copyright?: number;
   tag_count_general?: number;
   tag_count_meta?: number;
+  original_post_id?: string;
+  original_source?: string;
 }
 
 export interface ImageData {
@@ -23,6 +25,7 @@ export interface ImageData {
   file_name: string;
   hash: string;
   is_favorite: boolean;
+  organized: boolean;
   main_data: Post | null;
   thumbnail_path: string;
   has_duplicate?: number | null;
