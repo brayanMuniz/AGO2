@@ -70,6 +70,7 @@ const MetadataMatcher: React.FC<MetadataMatcherProps> = ({
   const [updating, setUpdating] = useState<boolean>(false);
   const [showCustomModal, setShowCustomModal] = useState<boolean>(false);
   const [fetchedFileSize, setFetchedFileSize] = useState<number | undefined>(fileSize);
+  const [selectedComparisonMatch, setSelectedComparisonMatch] = useState<MatchRecord | null>(null);
 
   useEffect(() => {
     if (fileSize !== undefined) {
@@ -79,7 +80,9 @@ const MetadataMatcher: React.FC<MetadataMatcherProps> = ({
     fetch(`/api/image/${imageId}`)
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (data?.file_size) setFetchedFileSize(data.file_size);
+        if (data && data.file_size) {
+          setFetchedFileSize(data.file_size);
+        }
       })
       .catch(() => {});
   }, [imageId, fileSize]);
@@ -100,6 +103,11 @@ const MetadataMatcher: React.FC<MetadataMatcherProps> = ({
       if (!response.ok) throw new Error('Failed to fetch matches');
       const data: MatchRecord[] = await response.json();
       setMatches(data || []);
+      if (data && data.length > 0) {
+        setSelectedComparisonMatch(data[0]);
+      } else {
+        setSelectedComparisonMatch(null);
+      }
     } catch (err: any) {
       setError(err.message || 'An error occurred while fetching matches.');
     } finally {
@@ -177,53 +185,167 @@ const MetadataMatcher: React.FC<MetadataMatcherProps> = ({
 
       <div className="flex flex-1 p-6 gap-6 min-h-0">
         {/* LEFT PANEL */}
-        <div className="flex-1 bg-[#1c1c24] border border-[#2a2a35] rounded-xl p-4 flex flex-col items-center justify-center relative min-h-0 h-full">
-          {onClose && (
-            <button
-              onClick={onClose}
-              className="absolute top-4 left-4 bg-[#2a2a35] hover:bg-[#3a3a45] px-3 py-1.5 rounded text-sm text-gray-300 transition-colors cursor-pointer flex items-center gap-2"
-            >
-              &larr; Back to Image
-            </button>
+        {/* LEFT PANEL */}
+        <div className="flex-1 bg-[#1c1c24] border border-[#2a2a35] rounded-xl p-4 flex flex-col relative min-h-0 h-full overflow-hidden">
+          {/* Top toolbar overlays */}
+          <div className="absolute top-4 left-4 right-4 flex items-center justify-between z-10 pointer-events-none">
+            <div className="pointer-events-auto">
+              {onClose && (
+                <button
+                  onClick={onClose}
+                  className="bg-[#2a2a35] hover:bg-[#3a3a45] px-3 py-1.5 rounded text-sm text-gray-300 transition-colors cursor-pointer flex items-center gap-2"
+                >
+                  &larr; Back to Image
+                </button>
+              )}
+            </div>
+
+            <div className="pointer-events-auto bg-[#15151a] p-1 rounded-lg border border-[#2a2a35]">
+              <DeleteImageButton
+                imageId={imageId}
+                redirectTo="/"
+                variant="icon"
+                onDeleted={() => {
+                  if (inQueue && onNext && !isLast) {
+                    onNext();
+                  }
+                }}
+              />
+            </div>
+          </div>
+
+          {selectedComparisonMatch ? (
+            <div className="w-full flex-1 flex flex-col min-h-0 pt-12">
+              <div className="flex items-center justify-between mb-2 px-1 shrink-0">
+                <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">
+                  Original Image
+                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-purple-400 uppercase tracking-wider">
+                    Comparing Match #{selectedComparisonMatch.post_id} ({selectedComparisonMatch.score.toFixed(1)}%)
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedComparisonMatch(null)}
+                    className="text-[11px] text-gray-400 hover:text-white px-2 py-0.5 bg-[#15151a] border border-[#2a2a35] rounded transition-colors cursor-pointer"
+                  >
+                    Single View
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex-1 grid grid-cols-2 gap-4 min-h-0">
+                {/* LEFT: Base Image */}
+                <div className="flex flex-col items-center justify-center bg-[#111115] border border-[#2a2a35] rounded-lg p-3 overflow-hidden relative">
+                  <img
+                    src={`/images/${fileName}?v=${currentWidth}x${currentHeight}`}
+                    alt="Original file"
+                    className="max-w-full max-h-full object-contain rounded"
+                    onLoad={(e) => {
+                      setCurrentWidth(e.currentTarget.naturalWidth);
+                      setCurrentHeight(e.currentTarget.naturalHeight);
+                    }}
+                    onError={(e) => {
+                      e.currentTarget.style.display = 'none';
+                      e.currentTarget.parentElement?.classList.add('bg-black');
+                    }}
+                  />
+                  <div className="absolute bottom-2 left-2 right-2 bg-black/80 backdrop-blur-sm px-3 py-1.5 rounded text-xs text-gray-300 flex justify-between items-center">
+                    <span className="truncate font-medium">{fileName}</span>
+                    <span className="font-mono text-white shrink-0 ml-2">
+                      {currentWidth > 0 && currentHeight > 0 ? `${currentWidth} × ${currentHeight}` : ''}
+                      {fetchedFileSize !== undefined ? ` • ${formatBytes(fetchedFileSize)}` : ''}
+                    </span>
+                  </div>
+                </div>
+
+                {/* RIGHT: Selected Candidate Image */}
+                <div className="flex flex-col items-center justify-center bg-[#111115] border border-purple-500/50 rounded-lg p-3 overflow-hidden relative">
+                  {Boolean(
+                    selectedComparisonMatch.post.large_file_url ||
+                    selectedComparisonMatch.post.file_url ||
+                    selectedComparisonMatch.post.preview_file_url
+                  ) ? (
+                    <>
+                      <div className="absolute top-2 left-2 bg-black/85 border border-purple-500/40 backdrop-blur-md px-2.5 py-1 rounded text-[11px] text-purple-200 z-10 flex items-center gap-1.5 shadow-md max-w-[90%]">
+                        <span className="w-2 h-2 rounded-full bg-purple-400 shrink-0"></span>
+                        <span className="truncate">
+                          Comparison image is sample resolution — replacing will get the full quality image ({selectedComparisonMatch.post.image_width} × {selectedComparisonMatch.post.image_height})
+                        </span>
+                      </div>
+
+                      <img
+                        src={`/api/proxy-image?url=${encodeURIComponent(
+                          selectedComparisonMatch.post.large_file_url ||
+                          selectedComparisonMatch.post.file_url ||
+                          selectedComparisonMatch.post.preview_file_url || ''
+                        )}`}
+                        alt={`Candidate #${selectedComparisonMatch.post_id}`}
+                        className="max-w-full max-h-full object-contain rounded"
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <div className="absolute top-2 left-2 bg-black/85 border border-yellow-500/40 backdrop-blur-md px-2.5 py-1 rounded text-[11px] text-yellow-200 z-10 flex items-center gap-1.5 shadow-md max-w-[90%]">
+                        <span className="w-2 h-2 rounded-full bg-yellow-400 shrink-0"></span>
+                        <span className="truncate">
+                          Image taken down — metadata is still available for matching
+                        </span>
+                      </div>
+
+                      <div className="flex flex-col items-center justify-center h-full text-center p-6 text-gray-400">
+                        <div className="w-14 h-14 rounded-full bg-yellow-500/10 border border-yellow-500/30 flex items-center justify-center text-yellow-400 mb-3">
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                        </div>
+                        <p className="text-sm font-bold text-gray-200">Image file taken down</p>
+                        <p className="text-xs text-gray-400 mt-1 max-w-[260px]">
+                          The image file is no longer hosted on Danbooru, but its tags and metadata are intact and ready to match.
+                        </p>
+                      </div>
+                    </>
+                  )}
+
+                  <div className="absolute bottom-2 left-2 right-2 bg-black/80 backdrop-blur-sm px-3 py-1.5 rounded text-xs text-gray-300 flex justify-between items-center">
+                    <span className="font-medium text-purple-300">
+                      Danbooru #{selectedComparisonMatch.post_id}
+                    </span>
+                    <span className="font-mono text-white shrink-0 ml-2">
+                      {selectedComparisonMatch.post.image_width} × {selectedComparisonMatch.post.image_height}
+                      {selectedComparisonMatch.post.file_size ? ` • ${formatBytes(selectedComparisonMatch.post.file_size)}` : ''}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="w-full flex-1 flex flex-col items-center justify-center min-h-0 pt-10">
+              <img
+                src={`/images/${fileName}?v=${currentWidth}x${currentHeight}`}
+                alt="Original file"
+                className="max-w-full max-h-[85%] object-contain rounded-lg"
+                onLoad={(e) => {
+                  setCurrentWidth(e.currentTarget.naturalWidth);
+                  setCurrentHeight(e.currentTarget.naturalHeight);
+                }}
+                onError={(e) => {
+                  e.currentTarget.style.display = 'none';
+                  e.currentTarget.parentElement?.classList.add('bg-black');
+                }}
+              />
+
+              <div className="mt-4 flex flex-wrap gap-4 text-sm text-gray-400 bg-black/40 px-4 py-2 rounded-lg">
+                <span>File: <span className="text-white">{fileName}</span></span>
+                {fetchedFileSize !== undefined && (
+                  <span>Size: <span className="text-white">{formatBytes(fetchedFileSize)}</span></span>
+                )}
+                {currentWidth > 0 && currentHeight > 0 && (
+                  <span>Current Res: <span className="text-white font-mono">{currentWidth} × {currentHeight}</span></span>
+                )}
+              </div>
+            </div>
           )}
-
-          <div className="absolute top-4 right-4 bg-[#15151a] p-1 rounded-lg border border-[#2a2a35]">
-            <DeleteImageButton
-              imageId={imageId}
-              redirectTo="/"
-              variant="icon"
-              onDeleted={() => {
-                if (inQueue && onNext && !isLast) {
-                  onNext();
-                }
-              }}
-            />
-          </div>
-
-          <img
-            src={`/images/${fileName}?v=${currentWidth}x${currentHeight}`}
-            alt="Original file"
-            className="max-w-full max-h-[85%] object-contain rounded-lg mt-4"
-            onLoad={(e) => {
-              // Automatically grab resolution from the image itself
-              setCurrentWidth(e.currentTarget.naturalWidth);
-              setCurrentHeight(e.currentTarget.naturalHeight);
-            }}
-            onError={(e) => {
-              e.currentTarget.style.display = 'none';
-              e.currentTarget.parentElement?.classList.add('bg-black');
-            }}
-          />
-
-          <div className="mt-4 flex flex-wrap gap-4 text-sm text-gray-400 bg-black/40 px-4 py-2 rounded-lg">
-            <span>File: <span className="text-white">{fileName}</span></span>
-            {fetchedFileSize !== undefined && (
-              <span>Size: <span className="text-white">{formatBytes(fetchedFileSize)}</span></span>
-            )}
-            {currentWidth > 0 && currentHeight > 0 && (
-              <span>Current Res: <span className="text-white font-mono">{currentWidth} × {currentHeight}</span></span>
-            )}
-          </div>
         </div>
 
         {/* RIGHT PANEL */}
@@ -294,17 +416,22 @@ const MetadataMatcher: React.FC<MetadataMatcherProps> = ({
                 const isHigherRes = !isExactMatch && currentArea > 0 && matchArea > currentArea;
                 const isLowerRes = !isExactMatch && currentArea > 0 && matchArea < currentArea;
 
+                const isComparing = selectedComparisonMatch?.post_id === match.post_id;
+
                 return (
                   <div
                     key={match.post_id}
-                    className={`flex gap-4 p-3 bg-[#111115] border rounded-lg transition-all group ${
-                      isExactMatch
+                    onClick={() => setSelectedComparisonMatch(match)}
+                    className={`flex gap-4 p-3 bg-[#111115] border rounded-lg transition-all cursor-pointer group ${
+                      isComparing
+                        ? 'border-purple-500 shadow-[0_0_15px_rgba(168,85,247,0.25)] bg-[#171424]'
+                        : isExactMatch
                         ? 'border-[#60a5fa]/80 shadow-[0_0_15px_rgba(96,165,250,0.12)]'
                         : 'border-[#2a2a35] hover:border-[#60a5fa]'
                     }`}
                   >
                     {/* Thumbnail */}
-                    <div className="w-24 h-24 shrink-0 bg-[#1c1c24] border border-[#2a2a35] rounded overflow-hidden flex items-center justify-center text-gray-600 text-xs">
+                    <div className="w-24 h-24 shrink-0 bg-[#1c1c24] border border-[#2a2a35] rounded overflow-hidden flex items-center justify-center text-gray-600 text-xs relative">
                       {match.post.preview_file_url ? (
                         <img
                           src={`/api/proxy-image?url=${encodeURIComponent(match.post.preview_file_url)}`}
@@ -326,7 +453,7 @@ const MetadataMatcher: React.FC<MetadataMatcherProps> = ({
                         </span>
 
                         {confirmMatchId === match.post_id ? (
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                             <span className="text-xs text-[#60a5fa] font-semibold">
                               {confirmAction === 'replace' ? 'Replace file?' : 'Match data?'}
                             </span>
@@ -351,7 +478,7 @@ const MetadataMatcher: React.FC<MetadataMatcherProps> = ({
                             </button>
                           </div>
                         ) : (
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                             <button
                               type="button"
                               onClick={() => {
