@@ -743,6 +743,7 @@ func SearchImagesByTags(db *sql.DB, searchTokens []string) ([]Image, error) {
 	}
 
 	var normalTags []string
+	var negatedTags []string
 	var ratings []string
 	var isFavoriteFilter *bool
 	var orderByColor string
@@ -847,6 +848,8 @@ func SearchImagesByTags(db *sql.DB, searchTokens []string) ([]Image, error) {
 			whereClauses = append(whereClauses, "f.organized = TRUE")
 		} else if lowerToken == "is:unorganized" {
 			whereClauses = append(whereClauses, "f.organized = FALSE")
+		} else if strings.HasPrefix(lowerToken, "-") && len(lowerToken) > 1 {
+			negatedTags = append(negatedTags, strings.TrimSpace(token[1:]))
 		} else {
 			normalTags = append(normalTags, strings.TrimSpace(token))
 		}
@@ -880,6 +883,16 @@ func SearchImagesByTags(db *sql.DB, searchTokens []string) ([]Image, error) {
 			args = append(args, tag)
 		}
 		whereClauses = append(whereClauses, fmt.Sprintf("t.name IN (%s)", strings.Join(placeholders, ",")))
+	}
+
+	// Handle Negated Tag Filters (exclude images that have these tags)
+	for _, negTag := range negatedTags {
+		whereClauses = append(whereClauses, `NOT EXISTS (
+			SELECT 1 FROM record_tags nrt
+			JOIN tags nt ON nrt.tag_id = nt.id
+			WHERE nrt.metadata_id = m.id AND nt.name = ?
+		)`)
+		args = append(args, negTag)
 	}
 
 	if len(whereClauses) > 0 {

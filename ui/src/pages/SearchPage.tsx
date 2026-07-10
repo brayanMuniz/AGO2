@@ -439,6 +439,9 @@ const SearchPage: React.FC = () => {
     applyFilters(addTagPill(filters, createTagPill(category, name)));
   };
 
+  const handleExcludeTag = (category: TagCategory, name: string) => {
+    applyFilters(addTagPill(filters, createTagPill(category, name, true)));
+  };
   const handleRemoveTag = (pillId: string) => {
     applyFilters(removeTagPill(filters, pillId));
   };
@@ -625,22 +628,55 @@ const SearchPage: React.FC = () => {
     const isExpanded = expandedCategories[category];
     const visibleTags = isExpanded ? tags : tags.slice(0, 5);
 
+    // Build a set of active search tag names for quick lookup
+    const activeTagNames = new Set(
+      filters.tags.map((t) => t.searchToken.replace(/^-/, '')),
+    );
+
     return (
       <React.Fragment key={category}>
-        {visibleTags.map((tag) => (
-          <li key={`${category}:${tag.name}`}>
-            <button
-              type="button"
-              onClick={() => handleAddTag(category, tag.name)}
-              className="flex w-full items-start text-[13px] hover:underline cursor-pointer text-left"
-            >
-              <span className={`${CATEGORY_COLORS[category]} font-medium leading-tight flex-1`}>
-                {tag.name}
-              </span>
-              <span className="text-gray-500 ml-1">{tag.count}</span>
-            </button>
-          </li>
-        ))}
+        {visibleTags.map((tag) => {
+          const isActive = activeTagNames.has(tag.name);
+          const isExcluded = filters.tags.some(
+            (t) => t.negated && t.searchToken === `-${tag.name}`,
+          );
+
+          return (
+            <li key={`${category}:${tag.name}`} className="flex items-center gap-1 group/tag">
+              <button
+                type="button"
+                onClick={() => handleAddTag(category, tag.name)}
+                className={`flex flex-1 items-start text-[13px] hover:underline cursor-pointer text-left min-w-0 ${
+                  isExcluded ? 'opacity-40 line-through' : ''
+                }`}
+              >
+                <span className={`${CATEGORY_COLORS[category]} font-medium leading-tight flex-1 truncate`}>
+                  {tag.name}
+                </span>
+                <span className="text-gray-500 ml-1 shrink-0">{tag.count}</span>
+              </button>
+              {!isExcluded && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleExcludeTag(category, tag.name);
+                  }}
+                  className={`shrink-0 w-5 h-5 flex items-center justify-center rounded transition-all ${
+                    isActive
+                      ? 'text-red-400/70 hover:text-red-300 hover:bg-red-500/15'
+                      : 'text-gray-600 opacity-0 group-hover/tag:opacity-100 hover:text-red-400 hover:bg-red-500/10'
+                  }`}
+                  title={`Exclude ${tag.name}`}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5">
+                    <path d="M3.5 8a.75.75 0 0 1 .75-.75h7.5a.75.75 0 0 1 0 1.5h-7.5A.75.75 0 0 1 3.5 8Z" />
+                  </svg>
+                </button>
+              )}
+            </li>
+          );
+        })}
         {tags.length > 5 && (
           <li>
             <button
@@ -676,6 +712,7 @@ const SearchPage: React.FC = () => {
               draftInput={draftInput}
               onDraftChange={setDraftInput}
               onAddTag={handleAddTag}
+              onExcludeTag={handleExcludeTag}
               suggestions={suggestions}
             />
             <SearchTagPills tags={filters.tags} onRemove={handleRemoveTag} />

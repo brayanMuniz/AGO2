@@ -4,6 +4,7 @@ export interface TagPill {
   id: string;
   label: string;
   searchToken: string;
+  negated?: boolean;
 }
 
 export interface SearchFilters {
@@ -101,6 +102,17 @@ export function parseSearchQuery(query: string): SearchFilters {
         return;
       }
 
+      if (token.startsWith('-') && token.length > 1) {
+        const rawName = token.slice(1);
+        filters.tags.push({
+          id: `neg-${index}-${rawName}`,
+          label: rawName,
+          searchToken: `-${rawName}`,
+          negated: true,
+        });
+        return;
+      }
+
       filters.tags.push({
         id: `tag-${index}-${token}`,
         label: token,
@@ -111,11 +123,13 @@ export function parseSearchQuery(query: string): SearchFilters {
   return filters;
 }
 
-export function createTagPill(category: TagCategory, name: string): TagPill {
+export function createTagPill(category: TagCategory, name: string, negated = false): TagPill {
+  const prefix = negated ? 'neg-' : '';
   return {
-    id: `${category}:${name}`,
-    label: `${category}:${name}`,
-    searchToken: name,
+    id: `${prefix}${category}:${name}`,
+    label: negated ? name : `${category}:${name}`,
+    searchToken: negated ? `-${name}` : name,
+    negated,
   };
 }
 
@@ -131,9 +145,13 @@ export function addTagPill(filters: SearchFilters, pill: TagPill): SearchFilters
     return filters;
   }
 
+  // If adding a negated tag, remove the positive version first (and vice versa)
+  const oppositeName = pill.negated ? pill.searchToken.slice(1) : `-${pill.searchToken}`;
+  const cleanedTags = filters.tags.filter((tag) => tag.searchToken !== oppositeName);
+
   return {
     ...filters,
-    tags: [...filters.tags, pill],
+    tags: [...cleanedTags, pill],
   };
 }
 

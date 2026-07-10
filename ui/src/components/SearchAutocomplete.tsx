@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   filterTagSuggestions,
-  formatTagToken,
   type TagCategory,
   type TagSuggestion,
 } from '../utils/searchTags';
@@ -10,6 +9,7 @@ interface SearchAutocompleteProps {
   draftInput: string;
   onDraftChange: (value: string) => void;
   onAddTag: (category: TagCategory, name: string) => void;
+  onExcludeTag: (category: TagCategory, name: string) => void;
   suggestions: TagSuggestion[];
 }
 
@@ -25,6 +25,7 @@ const SearchAutocomplete: React.FC<SearchAutocompleteProps> = ({
   draftInput,
   onDraftChange,
   onAddTag,
+  onExcludeTag,
   suggestions,
 }) => {
   const [open, setOpen] = useState(false);
@@ -50,6 +51,12 @@ const SearchAutocomplete: React.FC<SearchAutocompleteProps> = ({
 
   const applySuggestion = (suggestion: TagSuggestion) => {
     onAddTag(suggestion.category, suggestion.name);
+    onDraftChange('');
+    setOpen(false);
+  };
+
+  const excludeSuggestion = (suggestion: TagSuggestion) => {
+    onExcludeTag(suggestion.category, suggestion.name);
     onDraftChange('');
     setOpen(false);
   };
@@ -113,27 +120,39 @@ const SearchAutocomplete: React.FC<SearchAutocompleteProps> = ({
       {open && draftInput.trim() && filtered.length > 0 && (
         <ul className="absolute left-0 right-0 top-full z-20 mt-1 max-h-64 overflow-y-auto rounded-sm border border-[#2a2a35] bg-[#1c1c24] shadow-lg">
           {filtered.map((suggestion, index) => {
-            const token = formatTagToken(suggestion.category, suggestion.name);
             const isActive = index === highlightIndex;
 
             return (
-              <li key={`${suggestion.category}:${suggestion.name}`}>
+              <li key={`${suggestion.category}:${suggestion.name}`} className="flex items-center">
                 <button
                   type="button"
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => applySuggestion(suggestion)}
                   onMouseEnter={() => setHighlightIndex(index)}
-                  className={`flex w-full items-center justify-between px-3 py-2 text-left text-sm ${
+                  className={`flex flex-1 items-center px-3 py-2 text-left text-sm min-w-0 ${
                     isActive ? 'bg-[#2a2a35]' : 'hover:bg-[#252530]'
                   }`}
                 >
-                  <span>
+                  <span className="truncate">
                     <span className={`${CATEGORY_COLORS[suggestion.category]} font-medium`}>
                       {suggestion.category}:
                     </span>
                     <span className="text-gray-200">{suggestion.name}</span>
                   </span>
-                  <span className="ml-3 text-xs text-gray-500">{token}</span>
+                  {suggestion.count != null && (
+                    <span className="ml-auto pl-2 text-xs text-gray-500 shrink-0">{suggestion.count}</span>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => excludeSuggestion(suggestion)}
+                  className="shrink-0 w-8 h-full flex items-center justify-center text-gray-600 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                  title={`Exclude ${suggestion.name}`}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5">
+                    <path d="M3.5 8a.75.75 0 0 1 .75-.75h7.5a.75.75 0 0 1 0 1.5h-7.5A.75.75 0 0 1 3.5 8Z" />
+                  </svg>
                 </button>
               </li>
             );
