@@ -725,6 +725,47 @@ func (a *App) handleTagAutocomplete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	suggestions := append(prefixMatches, containsMatches...)
+
+	// DB fallback: find tags in the database that weren't in the JSON file
+	if queryStr != "" && len(suggestions) < 30 {
+		// Build a set of already-found tag names for deduplication
+		foundNames := make(map[string]bool)
+		for _, s := range suggestions {
+			foundNames[strings.ToLower(s.Name)] = true
+		}
+
+		dbQuery := `SELECT name, category FROM tags WHERE LOWER(name) LIKE ?`
+		dbArgs := []interface{}{"%" + queryStr + "%"}
+
+		if categoryFilter != "" {
+			dbQuery += ` AND LOWER(category) = ?`
+			dbArgs = append(dbArgs, categoryFilter)
+		}
+
+		dbQuery += ` ORDER BY name LIMIT ?`
+		remaining := 30 - len(suggestions)
+		dbArgs = append(dbArgs, remaining+10) // fetch a few extra to account for dedup filtering
+
+		rows, err := a.DB.Query(dbQuery, dbArgs...)
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() && len(suggestions) < 30 {
+				var name, category string
+				if err := rows.Scan(&name, &category); err != nil {
+					continue
+				}
+				if foundNames[strings.ToLower(name)] {
+					continue
+				}
+				foundNames[strings.ToLower(name)] = true
+				suggestions = append(suggestions, TagSuggestion{
+					Name:     name,
+					Category: category,
+				})
+			}
+		}
+	}
+
 	if len(suggestions) > 30 {
 		suggestions = suggestions[:30]
 	}
@@ -935,4 +976,103 @@ func (a *App) handleExtractPaletteFromImages(w http.ResponseWriter, r *http.Requ
 	json.NewEncoder(w).Encode(map[string][]string{
 		"colors": colors,
 	})
+}
+
+// GET /api/stats
+func (a *App) handleGetStats(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		sendJSONError(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Parse optional query params
+	tagLimit := 0
+	if v := r.URL.Query().Get("tag_limit"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			tagLimit = parsed
+		}
+	}
+
+	predictiveLimit := 0
+	if v := r.URL.Query().Get("predictive_limit"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			predictiveLimit = parsed
+		}
+	}
+
+	minCount := 5
+	if v := r.URL.Query().Get("min_count"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			minCount = parsed
+		}
+	}
+
+	artistLimit := 15
+	if v := r.URL.Query().Get("artist_limit"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			artistLimit = parsed
+		}
+	}
+
+	// Gather all stats
+	library, err := GetLibraryStats(a.DB)
+	if err != nil {
+		sendJSONError(w, "Failed to get library stats", http.StatusInternalServerError)
+		fmt.Printf("Error getting library stats: %v\n", err)
+		return
+	}
+
+	categories := []string{"artist", "character", "copyright", "general"}
+	leaderboards := make(map[string][]TagLeaderboardEntry)
+	leaderboardsFav := make(map[string][]TagLeaderboardEntry)
+	for _, cat := range categories {
+		entries, err := GetTagLeaderboard(a.DB, cat, tagLimit)
+		if err != nil {
+			sendJSONError(w, "Failed to get tag leaderboard", http.StatusInternalServerError)
+			fmt.Printf("Error getting %s leaderboard: %v\n", cat, err)
+			return
+		}
+		leaderboards[cat] = entries
+
+		favEntries, err := GetTagLeaderboardByFavorites(a.DB, cat, tagLimit)
+		if err != nil {
+			sendJSONError(w, "Failed to get favorites tag leaderboard", http.StatusInternalServerError)
+			fmt.Printf("Error getting %s favorites leaderboard: %v\n", cat, err)
+			return
+		}
+		leaderboardsFav[cat] = favEntries
+	}
+
+	ratingDist, err := GetRatingDistribution(a.DB)
+	if err != nil {
+		sendJSONError(w, "Failed to get rating distribution", http.StatusInternalServerError)
+		fmt.Printf("Error getting rating distribution: %v\n", err)
+		return
+	}
+
+	predictiveByRating, err := GetPredictiveTagAnalytics(a.DB, minCount, predictiveLimit)
+	if err != nil {
+		sendJSONError(w, "Failed to get predictive analytics", http.StatusInternalServerError)
+		fmt.Printf("Error getting predictive analytics: %v\n", err)
+		return
+	}
+
+	artistProfiles, err := GetArtistProfiles(a.DB, artistLimit)
+	if err != nil {
+		sendJSONError(w, "Failed to get artist profiles", http.StatusInternalServerError)
+		fmt.Printf("Error getting artist profiles: %v\n", err)
+		return
+	}
+
+	payload := StatsPayload{
+		Library:            library,
+		TagLeaderboards:    leaderboards,
+		TagLeaderboardsFav: leaderboardsFav,
+		RatingDist:         ratingDist,
+		PredictiveByRating: predictiveByRating,
+		ArtistProfiles:     artistProfiles,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(payload)
 }

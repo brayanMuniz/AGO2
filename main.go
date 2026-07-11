@@ -60,6 +60,7 @@ func main() {
 	http.HandleFunc("GET /api/tags/autocomplete", app.handleTagAutocomplete)
 	http.HandleFunc("GET /api/filters", app.handleGetSavedFilters)
 	http.HandleFunc("GET /api/palettes", app.handleGetSavedPalettes)
+	http.HandleFunc("GET /api/stats", app.handleGetStats)
 
 	http.HandleFunc("POST /api/process-gallery", app.handleProcessGallery)
 	http.HandleFunc("POST /api/album/export", app.handleExportAlbum)

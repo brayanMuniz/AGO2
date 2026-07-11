@@ -16,11 +16,20 @@ const TopBar: React.FC = () => {
         </Link>
       </div>
 
-      {/* Right Side: Settings */}
-      <div className="flex items-center">
+      {/* Right Side: Navigation */}
+      <div className="flex items-center gap-4">
+        <Link
+          to="/stats"
+          className={`text-sm transition-colors ${location.pathname === '/stats'
+              ? 'text-white font-medium'
+              : 'text-gray-400 hover:text-gray-200'
+            }`}
+        >
+          Stats
+        </Link>
         <Link
           to="/settings"
-          className={`text-sm transition-colors ${location.pathname === '/settings'
+          className={`text-sm transition-colors ${location.pathname === '/settings' || location.pathname.startsWith('/settings/')
               ? 'text-white font-medium'
               : 'text-gray-400 hover:text-gray-200'
             }`}
