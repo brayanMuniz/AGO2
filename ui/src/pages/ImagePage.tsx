@@ -82,19 +82,36 @@ const ImagePage: React.FC = () => {
     }
   }, [nextId, navigate]);
 
+  const handleToggleFavorite = useCallback(async () => {
+    if (!imageData) return;
+
+    const previous = imageData.is_favorite;
+    const next = !previous;
+    setImageData({ ...imageData, is_favorite: next });
+
+    try {
+      await updateFavorite(imageData.id, next);
+    } catch {
+      setImageData({ ...imageData, is_favorite: previous });
+    }
+  }, [imageData]);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-      if (e.key === 'ArrowLeft') {
+      if (e.key === 'ArrowLeft' || e.key === 'h' || e.key === 'H') {
         goToPrev();
-      } else if (e.key === 'ArrowRight') {
+      } else if (e.key === 'ArrowRight' || e.key === 'l' || e.key === 'L') {
         goToNext();
+      } else if (e.key === 'f' || e.key === 'F') {
+        e.preventDefault();
+        handleToggleFavorite();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [goToPrev, goToNext]);
+  }, [goToPrev, goToNext, handleToggleFavorite]);
 
   const fetchImage = useCallback(async () => {
     setLoading(true);
@@ -126,20 +143,6 @@ const ImagePage: React.FC = () => {
     const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return `${parseFloat((bytes / k ** i).toFixed(0))} ${sizes[i]}`;
-  };
-
-  const handleToggleFavorite = async () => {
-    if (!imageData) return;
-
-    const previous = imageData.is_favorite;
-    const next = !previous;
-    setImageData({ ...imageData, is_favorite: next });
-
-    try {
-      await updateFavorite(imageData.id, next);
-    } catch {
-      setImageData({ ...imageData, is_favorite: previous });
-    }
   };
 
   if (loading) {

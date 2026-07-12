@@ -1,7 +1,9 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import TopBar from './TopBar';
 import DeleteImageButton from './DeleteImageButton';
 import CustomMetadataModal from './CustomMetadataModal';
+import FavoriteStar from './FavoriteStar';
+import { updateFavorite } from '../api/images';
 
 interface Post {
   id: number;
@@ -66,26 +68,64 @@ const MetadataMatcher: React.FC<MetadataMatcherProps> = ({
 
   // States for the inline confirmation and API call
   const [confirmMatchId, setConfirmMatchId] = useState<number | null>(null);
-  const [confirmAction, setConfirmAction] = useState<'match' | 'replace' | null>(null);
+  const [confirmAction, setConfirmAction] = useState<'match' | 'replace' | 'download' | null>(null);
   const [updating, setUpdating] = useState<boolean>(false);
   const [showCustomModal, setShowCustomModal] = useState<boolean>(false);
   const [fetchedFileSize, setFetchedFileSize] = useState<number | undefined>(fileSize);
   const [selectedComparisonMatch, setSelectedComparisonMatch] = useState<MatchRecord | null>(null);
+  const [isFavorite, setIsFavorite] = useState<boolean>(false);
 
   useEffect(() => {
     if (fileSize !== undefined) {
       setFetchedFileSize(fileSize);
-      return;
     }
     fetch(`/api/image/${imageId}`)
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (data && data.file_size) {
-          setFetchedFileSize(data.file_size);
+        if (data) {
+          if (data.file_size && fileSize === undefined) {
+            setFetchedFileSize(data.file_size);
+          }
+          if (data.is_favorite !== undefined) {
+            setIsFavorite(data.is_favorite);
+          }
         }
       })
       .catch(() => {});
   }, [imageId, fileSize]);
+
+  const handleToggleFavorite = useCallback(async () => {
+    const nextVal = !isFavorite;
+    setIsFavorite(nextVal);
+    try {
+      await updateFavorite(imageId, nextVal);
+    } catch (err) {
+      setIsFavorite(!nextVal);
+    }
+  }, [isFavorite, imageId]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (e.key === 'f' || e.key === 'F') {
+        e.preventDefault();
+        handleToggleFavorite();
+      } else if (e.key === 'h' || e.key === 'H') {
+        if (onPrev) {
+          e.preventDefault();
+          onPrev();
+        }
+      } else if (e.key === 'l' || e.key === 'L') {
+        if (onNext) {
+          e.preventDefault();
+          onNext();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleToggleFavorite, onPrev, onNext]);
 
   const formatBytes = (bytes: number) => {
     if (!bytes) return '0 Bytes';
@@ -146,6 +186,27 @@ const MetadataMatcher: React.FC<MetadataMatcherProps> = ({
 
     setUpdating(true);
     try {
+      if (confirmAction === 'download') {
+        const response = await fetch('/api/image/download-match', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            post: match.post,
+          }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || 'Failed to download image.');
+        }
+
+        setConfirmMatchId(null);
+        setConfirmAction(null);
+        return;
+      }
+
       const response = await fetch(`/api/image/${imageId}`, {
         method: 'PATCH',
         headers: {
@@ -189,7 +250,7 @@ const MetadataMatcher: React.FC<MetadataMatcherProps> = ({
         <div className="flex-1 bg-[#1c1c24] border border-[#2a2a35] rounded-xl p-4 flex flex-col relative min-h-0 h-full overflow-hidden">
           {/* Top toolbar overlays */}
           <div className="absolute top-4 left-4 right-4 flex items-center justify-between z-10 pointer-events-none">
-            <div className="pointer-events-auto">
+            <div className="pointer-events-auto flex items-center gap-2">
               {onClose && (
                 <button
                   onClick={onClose}
@@ -198,19 +259,22 @@ const MetadataMatcher: React.FC<MetadataMatcherProps> = ({
                   &larr; Back to Image
                 </button>
               )}
-            </div>
-
-            <div className="pointer-events-auto bg-[#15151a] p-1 rounded-lg border border-[#2a2a35]">
-              <DeleteImageButton
-                imageId={imageId}
-                redirectTo="/"
-                variant="icon"
-                onDeleted={() => {
-                  if (inQueue && onNext && !isLast) {
-                    onNext();
-                  }
-                }}
-              />
+              <div className="bg-[#15151a] px-2 py-1 rounded-lg border border-[#2a2a35] flex items-center gap-1.5">
+                <FavoriteStar
+                  isFavorite={isFavorite}
+                  onToggle={handleToggleFavorite}
+                />
+                <DeleteImageButton
+                  imageId={imageId}
+                  redirectTo="/"
+                  variant="icon"
+                  onDeleted={() => {
+                    if (inQueue && onNext && !isLast) {
+                      onNext();
+                    }
+                  }}
+                />
+              </div>
             </div>
           </div>
 
@@ -455,7 +519,11 @@ const MetadataMatcher: React.FC<MetadataMatcherProps> = ({
                         {confirmMatchId === match.post_id ? (
                           <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                             <span className="text-xs text-[#60a5fa] font-semibold">
-                              {confirmAction === 'replace' ? 'Replace file?' : 'Match data?'}
+                              {confirmAction === 'replace'
+                                ? 'Replace file?'
+                                : confirmAction === 'download'
+                                ? 'Download to gallery?'
+                                : 'Match data?'}
                             </span>
                             <button
                               type="button"
@@ -526,24 +594,48 @@ const MetadataMatcher: React.FC<MetadataMatcherProps> = ({
                         )}
                       </div>
 
-                    <div className="grid grid-cols-[80px_1fr] gap-x-2 gap-y-1 mt-1 truncate">
-                      <span className="text-gray-500">Source:</span>
-                      <a
-                        href={`https://danbooru.donmai.us/posts/${match.post_id}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-[#60a5fa] hover:underline truncate block"
-                      >
-                        Danbooru ↗
-                      </a>
+                    <div className="flex items-center justify-between mt-1">
+                      <div className="grid grid-cols-[80px_1fr] gap-x-2 gap-y-1 truncate flex-1">
+                        <span className="text-gray-500">Source:</span>
+                        <a
+                          href={`https://danbooru.donmai.us/posts/${match.post_id}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-[#60a5fa] hover:underline truncate block"
+                        >
+                          Danbooru ↗
+                        </a>
 
-                      <span className="text-gray-500">Res:</span>
-                      <span className={`${getResolutionColor(match.post.image_width, match.post.image_height)} font-mono`}>
-                        {match.post.image_width} × {match.post.image_height}
-                      </span>
+                        <span className="text-gray-500">Res:</span>
+                        <span className={`${getResolutionColor(match.post.image_width, match.post.image_height)} font-mono`}>
+                          {match.post.image_width} × {match.post.image_height}
+                        </span>
 
-                      <span className="text-gray-500">Size:</span>
-                      <span className="text-gray-300">{formatBytes(match.post.file_size)}</span>
+                        <span className="text-gray-500">Size:</span>
+                        <span className="text-gray-300">{formatBytes(match.post.file_size)}</span>
+                      </div>
+
+                      {confirmMatchId !== match.post_id && (
+                        <div className="flex shrink-0 ml-2" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            type="button"
+                            disabled={!canReplace}
+                            onClick={() => {
+                              if (!canReplace) return;
+                              setConfirmMatchId(match.post_id);
+                              setConfirmAction('download');
+                            }}
+                            className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors border ${
+                              !canReplace
+                                ? 'opacity-35 cursor-not-allowed bg-[#1c1c24] text-gray-500 border-transparent'
+                                : 'bg-purple-500/15 text-purple-400 border-purple-500/50 hover:bg-purple-500 hover:text-white cursor-pointer'
+                            }`}
+                            title={canReplace ? "Download and add this image to your Gallery" : "Danbooru file unavailable"}
+                          >
+                            Download
+                          </button>
+                        </div>
+                      )}
                     </div>
 
                     {/* Bottom tag pills for fast recognition */}

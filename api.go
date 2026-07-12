@@ -1076,3 +1076,115 @@ func (a *App) handleGetStats(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(payload)
 }
+
+// POST /api/image/download-match
+func (a *App) handleDownloadMatch(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		sendJSONError(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var reqBody struct {
+		Post *Post `json:"post"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil || reqBody.Post == nil {
+		sendJSONError(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	targetURL := reqBody.Post.FileURL
+	if targetURL == "" {
+		targetURL = reqBody.Post.LargeFileURL
+	}
+	if targetURL == "" {
+		sendJSONError(w, "Danbooru post has no downloadable file URL", http.StatusBadRequest)
+		return
+	}
+
+	u, err := url.Parse(targetURL)
+	ext := ".jpg"
+	if err == nil {
+		ext = filepath.Ext(u.Path)
+		if ext == "" {
+			ext = ".jpg"
+		}
+	}
+
+	filename := fmt.Sprintf("danbooru_%d%s", reqBody.Post.ID, ext)
+	destPath := filepath.Join("./Gallery", filename)
+
+	counter := 1
+	for {
+		if _, err := os.Stat(destPath); os.IsNotExist(err) {
+			break
+		}
+		filename = fmt.Sprintf("danbooru_%d_%d%s", reqBody.Post.ID, counter, ext)
+		destPath = filepath.Join("./Gallery", filename)
+		counter++
+	}
+
+	if err := DownloadAndReplaceImage(targetURL, destPath); err != nil {
+		sendJSONError(w, fmt.Sprintf("Failed to download image: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	hash, err := GetPixelHash(destPath)
+	if err != nil {
+		os.Remove(destPath)
+		sendJSONError(w, "Failed to hash downloaded image", http.StatusInternalServerError)
+		return
+	}
+	imgWidth, imgHeight, fileSize := GetFileDimensionsAndSize(destPath)
+
+	execRes, err := a.DB.Exec("INSERT INTO files (filename, hash, isFavorite, organized, image_width, image_height, file_size) VALUES (?, ?, FALSE, TRUE, ?, ?, ?)", filename, hash, imgWidth, imgHeight, fileSize)
+	if err != nil {
+		os.Remove(destPath)
+		sendJSONError(w, "Failed to save file record to DB", http.StatusInternalServerError)
+		return
+	}
+	newFileID, _ := execRes.LastInsertId()
+
+	thumbPath, thumbErr := GenerateThumbnail(destPath, "thumbnails")
+	if thumbErr == nil {
+		a.DB.Exec("UPDATE files SET thumbnail_path = ? WHERE id = ?", thumbPath, newFileID)
+	}
+
+	palette, _ := ExtractColorPalette(destPath, 5)
+	for _, color := range palette {
+		a.DB.Exec("INSERT INTO image_colors (file_id, r, g, b, hex, weight) VALUES (?, ?, ?, ?, ?, ?)",
+			newFileID, color.R, color.G, color.B, color.Hex, color.Weight)
+	}
+
+	query := `
+		INSERT INTO metadata_records 
+		(filename, provider_name, provider_id, score, file_url, large_file_url, rating, source)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`
+	execResMatch, err := a.DB.Exec(query,
+		filename,
+		"danbooru",
+		fmt.Sprintf("%d", reqBody.Post.ID),
+		100.0,
+		reqBody.Post.FileURL,
+		reqBody.Post.LargeFileURL,
+		reqBody.Post.Rating,
+		reqBody.Post.Source,
+	)
+	if err == nil {
+		recordID, _ := execResMatch.LastInsertId()
+		saveTags(a.DB, recordID, reqBody.Post.TagsArtist, "artist")
+		saveTags(a.DB, recordID, reqBody.Post.TagsCharacters, "character")
+		saveTags(a.DB, recordID, reqBody.Post.TagsCopyright, "copyright")
+		saveTags(a.DB, recordID, reqBody.Post.TagsGeneral, "general")
+		saveTags(a.DB, recordID, reqBody.Post.TagsMeta, "meta")
+
+		a.DB.Exec("UPDATE files SET active_metadata_id = ? WHERE id = ?", recordID, newFileID)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"message":      "Successfully downloaded and saved image",
+		"new_image_id": newFileID,
+		"filename":     filename,
+	})
+}
