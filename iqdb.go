@@ -13,6 +13,20 @@ import (
 	"time"
 )
 
+// MetadataProvider abstracts image reverse-search and tag lookup providers.
+type MetadataProvider interface {
+	SearchByFile(filePath string) (IQDBResponse, error)
+}
+
+type DanbooruIQDBProvider struct {
+	APIKey   string
+	UserName string
+}
+
+func (d *DanbooruIQDBProvider) SearchByFile(filePath string) (IQDBResponse, error) {
+	return iqdb_upload_request(d.APIKey, d.UserName, filePath)
+}
+
 type IQDBResponse []IQDBMatch
 
 type IQDBMatch struct {

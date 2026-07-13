@@ -546,27 +546,6 @@ func (a *App) handleImageUpdate(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GET /api/images/unmatched
-func (a *App) handleGetUnmatchedImages(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		sendJSONError(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	images, err := GetImagesWithoutMetadata(a.DB)
-	if err != nil {
-		sendJSONError(w, "Failed to fetch unmatched images", http.StatusInternalServerError)
-		fmt.Printf("Database error fetching unmatched images: %v\n", err)
-		return
-	}
-
-	if images == nil {
-		images = make([]Image, 0)
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(images)
-}
 
 // POST /api/album/export
 func (a *App) handleExportAlbum(w http.ResponseWriter, r *http.Request) {
