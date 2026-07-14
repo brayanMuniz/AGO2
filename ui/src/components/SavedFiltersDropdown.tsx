@@ -29,6 +29,20 @@ const SavedFiltersDropdown: React.FC<SavedFiltersDropdownProps> = ({
   const dropdownRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const [defaultFilter, setDefaultFilter] = useState<{
+    id?: number | null;
+    query?: string;
+    sortBy?: string;
+    sortOrder?: string;
+  } | null>(() => {
+    try {
+      const str = localStorage.getItem('ago2_default_filter');
+      return str ? JSON.parse(str) : null;
+    } catch {
+      return null;
+    }
+  });
+
   useEffect(() => {
     fetchFilters();
   }, []);
@@ -113,6 +127,10 @@ const SavedFiltersDropdown: React.FC<SavedFiltersDropdownProps> = ({
       if (activeFilterId === filter.id) {
         setActiveFilterId(null);
       }
+      if (defaultFilter && defaultFilter.id === filter.id) {
+        localStorage.removeItem('ago2_default_filter');
+        setDefaultFilter(null);
+      }
     } catch (err: any) {
       setError(err.message || 'Failed to delete filter');
     }
@@ -125,6 +143,27 @@ const SavedFiltersDropdown: React.FC<SavedFiltersDropdownProps> = ({
       setIsNaming(false);
       setNewName('');
       setError(null);
+    }
+  };
+
+  const isCurrentDefault = defaultFilter && (
+    (activeFilterId && defaultFilter.id === activeFilterId) ||
+    (!activeFilterId && defaultFilter.query === currentQuery && defaultFilter.sortBy === currentSortBy && defaultFilter.sortOrder === currentSortOrder)
+  );
+
+  const handleToggleDefault = () => {
+    if (isCurrentDefault) {
+      localStorage.removeItem('ago2_default_filter');
+      setDefaultFilter(null);
+    } else {
+      const df = {
+        id: activeFilterId || null,
+        query: currentQuery,
+        sortBy: currentSortBy,
+        sortOrder: currentSortOrder,
+      };
+      localStorage.setItem('ago2_default_filter', JSON.stringify(df));
+      setDefaultFilter(df);
     }
   };
 
@@ -189,6 +228,7 @@ const SavedFiltersDropdown: React.FC<SavedFiltersDropdownProps> = ({
                 type="button"
                 onClick={() => {
                   setActiveFilterId(null);
+                  onLoadFilter('', 'none', 'desc');
                 }}
                 className="text-[10px] text-red-400 hover:text-red-300 transition-colors"
               >
@@ -214,6 +254,7 @@ const SavedFiltersDropdown: React.FC<SavedFiltersDropdownProps> = ({
 
             {filters.map((filter) => {
               const isActive = filter.id === activeFilterId;
+              const isFilterDefault = defaultFilter && defaultFilter.id === filter.id;
               return (
                 <div
                   key={filter.id}
@@ -224,8 +265,11 @@ const SavedFiltersDropdown: React.FC<SavedFiltersDropdownProps> = ({
                       : 'text-gray-300 hover:bg-[#25252f]'
                   }`}
                 >
-                  <span className="flex-1 text-xs truncate" title={filter.query}>
-                    {filter.name}
+                  <span className="flex-1 text-xs truncate flex items-center gap-1.5" title={filter.query}>
+                    <span>{filter.name}</span>
+                    {isFilterDefault && (
+                      <span className="text-amber-400 text-[10px] font-semibold" title="Default filter">★ Default</span>
+                    )}
                   </span>
 
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -275,8 +319,8 @@ const SavedFiltersDropdown: React.FC<SavedFiltersDropdownProps> = ({
             })}
           </div>
 
-          {/* Save New section */}
-          <div className="border-t border-[#2a2a35] px-3 py-2">
+          {/* Save New & Default section */}
+          <div className="border-t border-[#2a2a35] px-3 py-2 space-y-1">
             {isNaming ? (
               <div className="flex items-center gap-2">
                 <input
@@ -309,14 +353,26 @@ const SavedFiltersDropdown: React.FC<SavedFiltersDropdownProps> = ({
                 </button>
               </div>
             ) : (
-              <button
-                type="button"
-                onClick={() => setIsNaming(true)}
-                disabled={!currentQuery.trim() && currentSortBy === 'none'}
-                className="w-full text-xs text-[#60a5fa] hover:text-[#93c5fd] transition-colors py-1 disabled:text-gray-600 disabled:cursor-not-allowed cursor-pointer"
-              >
-                + Save current filters
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={() => setIsNaming(true)}
+                  disabled={!currentQuery.trim() && currentSortBy === 'none'}
+                  className="w-full text-xs text-[#60a5fa] hover:text-[#93c5fd] transition-colors py-1 disabled:text-gray-600 disabled:cursor-not-allowed cursor-pointer text-left"
+                >
+                  + Save current filters
+                </button>
+                <button
+                  type="button"
+                  onClick={handleToggleDefault}
+                  className={`w-full text-xs transition-colors py-1 cursor-pointer text-left flex items-center justify-between ${
+                    isCurrentDefault ? 'text-amber-400 hover:text-amber-300' : 'text-gray-400 hover:text-gray-200'
+                  }`}
+                >
+                  <span>{isCurrentDefault ? '★ Filter is set as default' : '★ Set filter as default'}</span>
+                  {isCurrentDefault && <span className="text-[10px] text-red-400 hover:underline">Remove</span>}
+                </button>
+              </>
             )}
           </div>
         </div>

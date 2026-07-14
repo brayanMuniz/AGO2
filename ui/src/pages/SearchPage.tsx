@@ -199,6 +199,9 @@ const SearchPage: React.FC = () => {
 
   const isMissing = /(?:^|\s)is:missing(?:\s|$)/.test(tagsQuery);
   const isDuplicate = /(?:^|\s)is:duplicate(?:\s|$)/.test(tagsQuery);
+  const isOrganized = /(?:^|\s)is:organized(?:\s|$)/.test(tagsQuery);
+  const isUnorganized = /(?:^|\s)(?:is:unorganized|is:missing)(?:\s|$)/.test(tagsQuery);
+  const isAnyStatus = !isOrganized && !isUnorganized;
 
   const updateUrlParams = (newTags?: string, newSort?: string, newOrder?: string) => {
     const t = newTags !== undefined ? newTags : tagsQuery;
@@ -212,6 +215,24 @@ const SearchPage: React.FC = () => {
     }
     setSearchParams(params);
   };
+
+  useEffect(() => {
+    if (!searchParams.get('tags') && !searchParams.get('sort')) {
+      const defaultFilterStr = localStorage.getItem('ago2_default_filter');
+      if (defaultFilterStr) {
+        try {
+          const df = JSON.parse(defaultFilterStr);
+          if (df && (df.query || (df.sortBy && df.sortBy !== 'none'))) {
+            setSortBy(df.sortBy || 'none');
+            setSortOrder(df.sortOrder || 'desc');
+            updateUrlParams(df.query || '', df.sortBy || 'none', df.sortOrder || 'desc');
+          }
+        } catch (e) {
+          console.error('Failed to load default filter:', e);
+        }
+      }
+    }
+  }, []);
 
   useEffect(() => {
     setFilters(parseSearchQuery(tagsQuery));
@@ -325,6 +346,22 @@ const SearchPage: React.FC = () => {
     tokens = tokens.filter((t) => !t.startsWith(prefix));
 
     if (newValue) tokens.push(newValue);
+
+    const newQuery = tokens.join(' ');
+
+    if (debounceRef.current) window.clearTimeout(debounceRef.current);
+    debounceRef.current = window.setTimeout(() => {
+      updateUrlParams(newQuery);
+    }, 350);
+  };
+
+  const updateStatusFilter = (statusValue: 'organized' | 'unorganized' | null) => {
+    let tokens = tagsQuery.split(/\s+/).filter(Boolean);
+    tokens = tokens.filter((t) => t !== 'is:organized' && t !== 'is:unorganized' && t !== 'is:missing');
+
+    if (statusValue) {
+      tokens.push(`is:${statusValue}`);
+    }
 
     const newQuery = tokens.join(' ');
 
@@ -899,22 +936,47 @@ const SearchPage: React.FC = () => {
 
             {/* --- STATUS FILTERS --- */}
             <div className="mt-4 pt-4 border-t border-[#2a2a35]">
-              <h3 className="font-bold text-gray-400 mb-3 text-xs uppercase tracking-wider">Status</h3>
-              <div className="flex gap-2">
+              <h3 className="font-bold text-gray-400 mb-2 text-xs uppercase tracking-wider">Status</h3>
+              <div className="flex gap-1.5 flex-wrap">
                 <button
-                  onClick={() => updateSpecialFilter('is:missing', isMissing ? null : 'is:missing')}
-                  className={`px-3 py-1.5 rounded text-xs transition-colors border ${isMissing
-                    ? 'border-[#60a5fa] bg-[#60a5fa]/10 text-[#60a5fa]'
-                    : 'border-[#2a2a35] text-gray-400 hover:text-gray-200 hover:border-gray-500'
+                  type="button"
+                  onClick={() => updateStatusFilter(null)}
+                  className={`px-2.5 py-1 rounded text-xs transition-colors border ${isAnyStatus
+                    ? 'border-[#60a5fa] bg-[#60a5fa]/20 text-[#93c5fd]'
+                    : 'border-[#2a2a35] bg-[#111115] text-gray-400 hover:text-gray-200'
                     }`}
                 >
-                  Missing Data
+                  Any
                 </button>
                 <button
+                  type="button"
+                  onClick={() => updateStatusFilter('organized')}
+                  className={`px-2.5 py-1 rounded text-xs transition-colors border ${isOrganized
+                    ? 'border-[#60a5fa] bg-[#60a5fa]/20 text-[#93c5fd]'
+                    : 'border-[#2a2a35] bg-[#111115] text-gray-400 hover:text-gray-200'
+                    }`}
+                >
+                  Organized
+                </button>
+                <button
+                  type="button"
+                  onClick={() => updateStatusFilter('unorganized')}
+                  className={`px-2.5 py-1 rounded text-xs transition-colors border ${isUnorganized
+                    ? 'border-[#60a5fa] bg-[#60a5fa]/20 text-[#93c5fd]'
+                    : 'border-[#2a2a35] bg-[#111115] text-gray-400 hover:text-gray-200'
+                    }`}
+                >
+                  Unorganized
+                </button>
+              </div>
+
+              <div className="mt-2.5">
+                <button
+                  type="button"
                   onClick={() => updateSpecialFilter('is:duplicate', isDuplicate ? null : 'is:duplicate')}
-                  className={`px-3 py-1.5 rounded text-xs transition-colors border ${isDuplicate
-                    ? 'border-[#60a5fa] bg-[#60a5fa]/10 text-[#60a5fa]'
-                    : 'border-[#2a2a35] text-gray-400 hover:text-gray-200 hover:border-gray-500'
+                  className={`px-2.5 py-1 rounded text-xs transition-colors border ${isDuplicate
+                    ? 'border-[#60a5fa] bg-[#60a5fa]/20 text-[#93c5fd]'
+                    : 'border-[#2a2a35] bg-[#111115] text-gray-400 hover:text-gray-200'
                     }`}
                 >
                   Duplicate

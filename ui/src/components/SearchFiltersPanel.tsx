@@ -31,6 +31,17 @@ const SearchFiltersPanel: React.FC<SearchFiltersPanelProps> = ({
       <div>
         <h3 className="text-xs font-semibold text-gray-400 mb-2 uppercase tracking-wide">Rating</h3>
         <div className="flex flex-wrap gap-1.5">
+          <button
+            type="button"
+            onClick={() => update({ ratings: [] })}
+            className={`px-2.5 py-1 text-xs rounded border transition-colors ${
+              filters.ratings.length === 0
+                ? 'border-[#60a5fa] bg-[#60a5fa]/20 text-[#93c5fd]'
+                : 'border-[#2a2a35] bg-[#111115] text-gray-400 hover:text-gray-200'
+            }`}
+          >
+            Any
+          </button>
           {RATING_OPTIONS.map((option) => {
             const active = filters.ratings.includes(option.value);
             return (
