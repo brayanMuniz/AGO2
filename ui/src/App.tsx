@@ -5,8 +5,7 @@ import ImagePage from './pages/ImagePage';
 import StatsPage from './pages/StatsPage';
 import SettingsLayout from './layouts/SettingsLayout';
 import GeneralSettings from './pages/GeneralSettings';
-import MatchPage from './pages/MatchPage';
-import DuplicatesPage from './pages/DuplicatesPage';
+import DanbooruSettings from './pages/DanbooruSettings';
 
 function App() {
   return (
@@ -18,8 +17,7 @@ function App() {
       {/* Settings Layout with Nested Routes */}
       <Route path="/settings" element={<SettingsLayout />}>
         <Route index element={<GeneralSettings />} />
-        <Route path="match" element={<MatchPage />} />
-        <Route path="duplicates" element={<DuplicatesPage />} />
+        <Route path="danbooru" element={<DanbooruSettings />} />
       </Route>
 
       <Route path="/search" element={<Navigate to="/" replace />} />

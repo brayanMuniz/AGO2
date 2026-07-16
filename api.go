@@ -123,8 +123,7 @@ func (a *App) handleGetImageMatches(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	apiKey := os.Getenv("DANBOORU_KEY")
-	userName := os.Getenv("USERNAME")
+	userName, apiKey := GetDanbooruCredentials(a.DB)
 	fileLocation := "./Gallery/" + img.FileName
 
 	matches, err := iqdb_upload_request(apiKey, userName, fileLocation)
@@ -177,8 +176,7 @@ func (a *App) handleProcessGallery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	apiKey := os.Getenv("DANBOORU_KEY")
-	userName := os.Getenv("USERNAME")
+	userName, apiKey := GetDanbooruCredentials(a.DB)
 	targetDir := "./Gallery/"
 
 	job := &JobState{
@@ -383,11 +381,10 @@ func (a *App) handleBatchDeleteImages(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func DownloadAndReplaceImage(urlStr, destPath string) error {
+func DownloadAndReplaceImage(db *sql.DB, urlStr, destPath string) error {
 	client := &http.Client{Timeout: 45 * time.Second}
 
-	userName := os.Getenv("USERNAME")
-	apiKey := os.Getenv("DANBOORU_KEY")
+	userName, apiKey := GetDanbooruCredentials(db)
 
 	attemptDownload := func(targetURL string, userAgent string) (*http.Response, error) {
 		req, err := http.NewRequest("GET", targetURL, nil)
@@ -520,7 +517,7 @@ func (a *App) handleImageUpdate(w http.ResponseWriter, r *http.Request) {
 
 		if targetURL != "" {
 			destPath := filepath.Join("./Gallery/", filename)
-			err := DownloadAndReplaceImage(targetURL, destPath)
+			err := DownloadAndReplaceImage(a.DB, targetURL, destPath)
 			if err != nil {
 				fmt.Printf("Error replacing physical file %s: %v\n", filename, err)
 				sendJSONError(w, fmt.Sprintf("Failed to download and replace file: %v", err), http.StatusInternalServerError)
@@ -1102,7 +1099,7 @@ func (a *App) handleDownloadMatch(w http.ResponseWriter, r *http.Request) {
 		counter++
 	}
 
-	if err := DownloadAndReplaceImage(targetURL, destPath); err != nil {
+	if err := DownloadAndReplaceImage(a.DB, targetURL, destPath); err != nil {
 		sendJSONError(w, fmt.Sprintf("Failed to download image: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -1166,4 +1163,38 @@ func (a *App) handleDownloadMatch(w http.ResponseWriter, r *http.Request) {
 		"new_image_id": newFileID,
 		"filename":     filename,
 	})
+}
+
+func (a *App) handleGetDanbooruSettings(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		sendJSONError(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	username, apiKey := GetDanbooruCredentials(a.DB)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"username": username,
+		"api_key":  apiKey,
+	})
+}
+
+func (a *App) handleSaveDanbooruSettings(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		sendJSONError(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		Username string `json:"username"`
+		APIKey   string `json:"api_key"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		sendJSONError(w, "Invalid JSON body", http.StatusBadRequest)
+		return
+	}
+	if err := SaveDanbooruCredentials(a.DB, strings.TrimSpace(req.Username), strings.TrimSpace(req.APIKey)); err != nil {
+		sendJSONError(w, fmt.Sprintf("Failed to save credentials: %v", err), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"message": "Credentials saved successfully"})
 }

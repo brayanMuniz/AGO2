@@ -130,6 +130,13 @@ func createTables(db *sql.DB) error {
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 
+	-- APP SETTINGS
+	CREATE TABLE IF NOT EXISTS app_settings (
+		key TEXT PRIMARY KEY,
+		value TEXT NOT NULL,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+
 	-- Index for faster lookups when we doing math on colors columns
 	CREATE INDEX IF NOT EXISTS idx_image_colors_rgb ON image_colors(r, g, b);
 
@@ -645,6 +652,64 @@ func UpdateImage(db *sql.DB, fileID int64, params UpdateImageParams) error {
 	}
 
 	return nil
+}
+
+func GetDanbooruCredentials(db *sql.DB) (string, string) {
+	var username, apiKey string
+	if db != nil {
+		_ = db.QueryRow("SELECT value FROM app_settings WHERE key = 'danbooru_username'").Scan(&username)
+		_ = db.QueryRow("SELECT value FROM app_settings WHERE key = 'danbooru_api_key'").Scan(&apiKey)
+	}
+	if username == "" {
+		username = os.Getenv("USERNAME")
+	}
+	if apiKey == "" {
+		apiKey = os.Getenv("DANBOORU_KEY")
+	}
+	return username, apiKey
+}
+
+func SaveDanbooruCredentials(db *sql.DB, username, apiKey string) error {
+	_, err := db.Exec("INSERT INTO app_settings (key, value, updated_at) VALUES ('danbooru_username', ?, CURRENT_TIMESTAMP) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP", username)
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec("INSERT INTO app_settings (key, value, updated_at) VALUES ('danbooru_api_key', ?, CURRENT_TIMESTAMP) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP", apiKey)
+	if err != nil {
+		return err
+	}
+
+	os.Setenv("USERNAME", username)
+	os.Setenv("DANBOORU_KEY", apiKey)
+	updateEnvFile("USERNAME", username)
+	updateEnvFile("DANBOORU_KEY", apiKey)
+	return nil
+}
+
+func updateEnvFile(key, value string) {
+	envPath := "./.env"
+	content, err := os.ReadFile(envPath)
+	lines := []string{}
+	if err == nil {
+		lines = strings.Split(string(content), "\n")
+	}
+	found := false
+	for i, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), key+"=") {
+			lines[i] = fmt.Sprintf("%s=%s", key, value)
+			found = true
+			break
+		}
+	}
+	if !found {
+		if len(lines) > 0 && lines[len(lines)-1] == "" {
+			lines[len(lines)-1] = fmt.Sprintf("%s=%s", key, value)
+			lines = append(lines, "")
+		} else {
+			lines = append(lines, fmt.Sprintf("%s=%s", key, value))
+		}
+	}
+	_ = os.WriteFile(envPath, []byte(strings.Join(lines, "\n")), 0644)
 }
 
 

@@ -2,11 +2,9 @@ package main
 
 import (
 	"fmt"
+	"github.com/joho/godotenv"
 	"log"
 	"net/http"
-	"os"
-
-	"github.com/joho/godotenv"
 )
 
 func main() {
@@ -30,21 +28,11 @@ func main() {
 	http.Handle("/images/", noCacheHandler(http.StripPrefix("/images/", http.FileServer(http.Dir("./Gallery")))))
 	http.Handle("/thumbnails/", noCacheHandler(http.StripPrefix("/thumbnails/", http.FileServer(http.Dir("./thumbnails")))))
 
-	err = godotenv.Load("./.env")
-	if err != nil {
-		log.Fatalf("Could not read the .env file", err)
-	}
+	_ = godotenv.Load("./.env")
 
-	userName := os.Getenv("USERNAME")
-	if userName == "" {
-		fmt.Println("DANBOORU userName is empty")
-		return
-	}
-
-	apiKey := os.Getenv("DANBOORU_KEY")
-	if apiKey == "" {
-		fmt.Println("DANBOORU api key is empty")
-		return
+	userName, apiKey := GetDanbooruCredentials(database)
+	if userName == "" || apiKey == "" {
+		fmt.Println("Warning: Danbooru userName or API key not configured. Please set them via Settings -> Danbooru.")
 	}
 
 	app := &App{
@@ -60,6 +48,8 @@ func main() {
 	http.HandleFunc("GET /api/filters", app.handleGetSavedFilters)
 	http.HandleFunc("GET /api/palettes", app.handleGetSavedPalettes)
 	http.HandleFunc("GET /api/stats", app.handleGetStats)
+	http.HandleFunc("GET /api/settings/danbooru", app.handleGetDanbooruSettings)
+	http.HandleFunc("POST /api/settings/danbooru", app.handleSaveDanbooruSettings)
 
 	http.HandleFunc("POST /api/process-gallery", app.handleProcessGallery)
 	http.HandleFunc("POST /api/album/export", app.handleExportAlbum)

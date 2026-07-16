@@ -47,6 +47,20 @@ const SavedFiltersDropdown: React.FC<SavedFiltersDropdownProps> = ({
     fetchFilters();
   }, []);
 
+  useEffect(() => {
+    const match = filters.find(
+      (f) =>
+        (f.query || '').trim() === (currentQuery || '').trim() &&
+        (f.sort_by || 'none') === (currentSortBy || 'none') &&
+        (f.sort_order || 'desc') === (currentSortOrder || 'desc')
+    );
+    if (match) {
+      setActiveFilterId(match.id);
+    } else if (activeFilterId && filters.some((f) => f.id === activeFilterId && (f.query || '').trim() !== (currentQuery || '').trim())) {
+      setActiveFilterId(null);
+    }
+  }, [filters, currentQuery, currentSortBy, currentSortOrder]);
+
   // Close dropdown on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -77,8 +91,13 @@ const SavedFiltersDropdown: React.FC<SavedFiltersDropdownProps> = ({
   };
 
   const handleSelect = (filter: SavedFilter) => {
-    setActiveFilterId(filter.id);
-    onLoadFilter(filter.query || '', filter.sort_by || 'none', filter.sort_order || 'desc');
+    if (activeFilterId === filter.id || (filter.query || '').trim() === (currentQuery || '').trim()) {
+      setActiveFilterId(null);
+      onLoadFilter('', 'none', 'desc');
+    } else {
+      setActiveFilterId(filter.id);
+      onLoadFilter(filter.query || '', filter.sort_by || 'none', filter.sort_order || 'desc');
+    }
     setIsOpen(false);
     setIsNaming(false);
     setError(null);
@@ -223,14 +242,14 @@ const SavedFiltersDropdown: React.FC<SavedFiltersDropdownProps> = ({
             <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
               Saved Filters
             </span>
-            {activeFilterId && (
+            {(activeFilterId !== null || currentQuery || (currentSortBy && currentSortBy !== 'none')) && (
               <button
                 type="button"
                 onClick={() => {
                   setActiveFilterId(null);
                   onLoadFilter('', 'none', 'desc');
                 }}
-                className="text-[10px] text-red-400 hover:text-red-300 transition-colors"
+                className="text-[10px] text-red-400 hover:text-red-300 transition-colors cursor-pointer"
               >
                 Clear
               </button>

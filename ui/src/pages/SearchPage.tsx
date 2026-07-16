@@ -1005,6 +1005,7 @@ const SearchPage: React.FC = () => {
                 currentSortBy={sortBy}
                 currentSortOrder={sortOrder}
                 onLoadFilter={(query, newSortBy, newSortOrder) => {
+                  if (!query) setDraftInput('');
                   setSortBy(newSortBy as any);
                   setSortOrder(newSortOrder as any);
                   updateUrlParams(query, newSortBy, newSortOrder);
