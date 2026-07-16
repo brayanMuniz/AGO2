@@ -108,6 +108,7 @@ const MetadataMatcher: React.FC<MetadataMatcherProps> = ({
     const handleKeyDown = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key === 'f' || e.key === 'F') {
         e.preventDefault();
         handleToggleFavorite();
@@ -271,7 +272,9 @@ const MetadataMatcher: React.FC<MetadataMatcherProps> = ({
                   onDeleted={() => {
                     if (inQueue && onNext && !isLast) {
                       onNext();
+                      return true;
                     }
+                    return false;
                   }}
                 />
               </div>

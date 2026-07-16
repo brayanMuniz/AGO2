@@ -100,6 +100,7 @@ const ImagePage: React.FC = () => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key === 'ArrowLeft' || e.key === 'h' || e.key === 'H') {
         goToPrev();
       } else if (e.key === 'ArrowRight' || e.key === 'l' || e.key === 'L') {
@@ -270,23 +271,19 @@ const ImagePage: React.FC = () => {
                 onDeleted={() => {
                   if (inQueue && nextId) {
                     goToNext();
+                    return true;
                   }
+                  return false;
                 }}
               />
             </div>
           </div>
 
-          <TagCategory title="Artist" tags={post.tags_artist} colorClass="text-[#fca5a5]" />
-          <TagCategory title="Copyright" tags={post.tags_copyright} colorClass="text-[#c084fc]" />
-          <TagCategory title="Character" tags={post.tags_character} colorClass="text-[#4ade80]" />
-          <TagCategory title="General" tags={post.tags_general} colorClass="text-[#60a5fa]" />
-          <TagCategory title="Meta" tags={post.tags_meta} colorClass="text-[#fb923c]" />
-
-          <div className="mt-6 text-[13px]">
+          <div className="mb-6 pb-4 border-b border-[#2a2a35] text-[13px]">
             <h3 className="font-bold text-gray-200 mb-2 text-base">Information</h3>
             <div className="space-y-1">
               <p>
-                ID: <span className="text-gray-400">{post.id}</span>
+                ID: <span className="text-gray-400">{post.id || imageData.id}</span>
               </p>
               <p>
                 Size:{' '}
@@ -297,10 +294,25 @@ const ImagePage: React.FC = () => {
               </p>
 
               {post.source === 'Custom' || post.id === 0 ? (
-                <p className="truncate">
-                  Source:{' '}
-                  <span className="text-purple-400 font-semibold">Custom</span>
-                </p>
+                <>
+                  <p className="truncate">
+                    Source:{' '}
+                    <span className="text-purple-400 font-semibold">Custom</span>
+                  </p>
+                  {post.original_post_id && post.original_post_id !== '0' && (
+                    <p className="truncate">
+                      Danbooru:{' '}
+                      <a
+                        href={`https://danbooru.donmai.us/posts/${post.original_post_id}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-[#60a5fa] hover:underline"
+                      >
+                        #{post.original_post_id} ↗
+                      </a>
+                    </p>
+                  )}
+                </>
               ) : post.id ? (
                 <p className="truncate">
                   Source:{' '}
@@ -324,6 +336,12 @@ const ImagePage: React.FC = () => {
               </p>
             </div>
           </div>
+
+          <TagCategory title="Artist" tags={post.tags_artist} colorClass="text-[#fca5a5]" />
+          <TagCategory title="Copyright" tags={post.tags_copyright} colorClass="text-[#c084fc]" />
+          <TagCategory title="Character" tags={post.tags_character} colorClass="text-[#4ade80]" />
+          <TagCategory title="General" tags={post.tags_general} colorClass="text-[#60a5fa]" />
+          <TagCategory title="Meta" tags={post.tags_meta} colorClass="text-[#fb923c]" />
         </aside>
 
         <main className="flex-1 flex items-center justify-center p-4 overflow-hidden min-h-0 relative">

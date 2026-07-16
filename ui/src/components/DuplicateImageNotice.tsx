@@ -95,7 +95,9 @@ const DuplicateImageNotice: React.FC<DuplicateImageNoticeProps> = ({
               onDeleted={() => {
                 if (inQueue && onNext && !isLast) {
                   onNext();
+                  return true;
                 }
+                return false;
               }}
             />
           </div>

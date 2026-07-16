@@ -5,7 +5,7 @@ import { deleteImage } from '../api/images';
 interface DeleteImageButtonProps {
   imageId: number;
   redirectTo?: string;
-  onDeleted?: () => void;
+  onDeleted?: () => boolean | void;
   className?: string;
   variant?: 'icon' | 'button';
 }
@@ -20,6 +20,7 @@ const DeleteImageButton: React.FC<DeleteImageButtonProps> = ({
   const navigate = useNavigate();
   const [confirming, setConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [deleted, setDeleted] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const handleDelete = async () => {
@@ -28,18 +29,37 @@ const DeleteImageButton: React.FC<DeleteImageButtonProps> = ({
 
     try {
       await deleteImage(imageId);
-      if (onDeleted) {
-        onDeleted();
-        setConfirming(false);
-      } else {
-        navigate(redirectTo);
-      }
+      setDeleting(false);
+      setConfirming(false);
+      setDeleted(true);
+
+      window.setTimeout(() => {
+        if (onDeleted) {
+          const handled = onDeleted();
+          if (!handled) {
+            navigate(redirectTo);
+          }
+        } else {
+          navigate(redirectTo);
+        }
+      }, 900);
     } catch (err: any) {
       setError(err.message || 'Failed to delete image.');
       setDeleting(false);
       setConfirming(false);
     }
   };
+
+  if (deleted) {
+    return (
+      <div className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded bg-green-500/20 text-green-400 border border-green-500/30 shadow-lg ${className}`}>
+        <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+          <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+        </svg>
+        <span>Deleted!</span>
+      </div>
+    );
+  }
 
   if (confirming) {
     return (
