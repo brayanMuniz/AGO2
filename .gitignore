@@ -4,7 +4,7 @@ Albums/
 tmp/
 thumbnails/
 .DS_Store
-notes.txt
+notes.md
 response.json
 gallery.db
 .air.toml

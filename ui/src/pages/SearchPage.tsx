@@ -427,13 +427,21 @@ const SearchPage: React.FC = () => {
     }
   };
 
+  const [confirmingDeletePaletteId, setConfirmingDeletePaletteId] = useState<number | null>(null);
+
   const handleDeleteSavedPalette = async (id: number, e: React.MouseEvent) => {
     e.stopPropagation();
+    if (confirmingDeletePaletteId !== id) {
+      setConfirmingDeletePaletteId(id);
+      return;
+    }
     try {
       await fetch(`/api/palettes/${id}`, { method: 'DELETE' });
       fetchSavedPalettes();
     } catch (err) {
       console.error('Error deleting saved palette:', err);
+    } finally {
+      setConfirmingDeletePaletteId(null);
     }
   };
 
@@ -828,14 +836,33 @@ const SearchPage: React.FC = () => {
                           ))}
                         </span>
                         <span>{p.name}</span>
-                        <button
-                          type="button"
-                          onClick={(e) => handleDeleteSavedPalette(p.id, e)}
-                          className="text-gray-500 hover:text-red-400 ml-0.5 transition-colors"
-                          title="Delete saved palette"
-                        >
-                          ×
-                        </button>
+                        {confirmingDeletePaletteId === p.id ? (
+                          <span className="flex items-center gap-1 ml-0.5">
+                            <button
+                              type="button"
+                              onClick={(e) => handleDeleteSavedPalette(p.id, e)}
+                              className="text-[10px] text-red-400 hover:text-red-300 font-semibold transition-colors cursor-pointer"
+                            >
+                              Delete?
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); setConfirmingDeletePaletteId(null); }}
+                              className="text-[10px] text-gray-500 hover:text-gray-300 transition-colors cursor-pointer"
+                            >
+                              Cancel
+                            </button>
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={(e) => handleDeleteSavedPalette(p.id, e)}
+                            className="text-gray-500 hover:text-red-400 ml-0.5 transition-colors cursor-pointer"
+                            title="Delete saved palette"
+                          >
+                            ×
+                          </button>
+                        )}
                       </div>
                     ))}
                   </div>

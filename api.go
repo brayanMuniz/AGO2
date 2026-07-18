@@ -263,6 +263,19 @@ func runGalleryWorker(db *sql.DB, apikey, userName, dirPath string, job *JobStat
 
 		filePath := filepath.Join(dirPath, fileName)
 
+		info, infoErr := entry.Info()
+		if infoErr == nil {
+			var existingOrganized bool
+			var existingFileSize int64
+			err := db.QueryRow("SELECT organized, file_size FROM files WHERE filename = ?", fileName).Scan(&existingOrganized, &existingFileSize)
+			if err == nil && existingOrganized && existingFileSize == info.Size() && existingFileSize > 0 {
+				job.Lock()
+				job.Stats.Skipped++
+				job.Unlock()
+				continue
+			}
+		}
+
 		r, err := ProcessNewImageUpload(db, apikey, userName, fileName, filePath)
 		if err != nil {
 			fmt.Printf("Error processing %s: %v\n", fileName, err)
@@ -542,7 +555,6 @@ func (a *App) handleImageUpdate(w http.ResponseWriter, r *http.Request) {
 		"message": fmt.Sprintf("Successfully updated image ID %d", id),
 	})
 }
-
 
 // POST /api/album/export
 func (a *App) handleExportAlbum(w http.ResponseWriter, r *http.Request) {

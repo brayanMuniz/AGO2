@@ -157,6 +157,23 @@ type ProcessedImage struct {
 func ProcessNewImageUpload(db *sql.DB, apiKey, userName, filename, filePath string) (ProcessedImage, error) {
 	result := ProcessedImage{AutoMatch: false, Skipped: false}
 
+	// First check fast-path if a file with this exact filename exists and can be skipped without hashing or reading image bytes
+	var existingFileID int64
+	var existingFileHash string
+	var existingFileSize int64
+	var existingOrganized bool
+	err := db.QueryRow("SELECT id, hash, file_size, organized FROM files WHERE filename = ?", filename).Scan(&existingFileID, &existingFileHash, &existingFileSize, &existingOrganized)
+	if err == nil {
+		info, statErr := os.Stat(filePath)
+		if statErr == nil && info.Size() == existingFileSize && existingFileSize > 0 {
+			if existingOrganized || existingFileHash != "" {
+				fmt.Printf("Skipped: %s is already processed.\n", filename)
+				result.Skipped = true
+				return result, nil
+			}
+		}
+	}
+
 	hash, err := GetPixelHash(filePath)
 	if err != nil {
 		return result, fmt.Errorf("failed to hash image: %w", err)
@@ -170,11 +187,7 @@ func ProcessNewImageUpload(db *sql.DB, apiKey, userName, filename, filePath stri
 		palette = []Color{} // Default to empty array on failure
 	}
 
-	// First check if a file with this exact filename already exists in the database
-	var existingFileID int64
-	var existingFileHash string
-	err = db.QueryRow("SELECT id, hash FROM files WHERE filename = ?", filename).Scan(&existingFileID, &existingFileHash)
-	if err == nil {
+	if existingFileID > 0 {
 		if existingFileHash == hash {
 			// Filename and hash match. Already processed.
 			fmt.Printf("Skipped: %s is already processed.\n", filename)

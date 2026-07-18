@@ -187,7 +187,8 @@ func GenerateThumbnail(originalPath, thumbnailDir string) (string, error) {
 	return outPath, nil
 }
 
-// Extracts the top N dominant colors from an image and returns them as Color structs with weight
+// Extracts the top N dominant colors from an image and returns them as Color structs with weight.
+// Uses saturation and vibrancy weighting so vivid character colors rank above neutral backgrounds.
 func ExtractColorPalette(filePath string, numColors int) ([]Color, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
@@ -227,34 +228,78 @@ func ExtractColorPalette(filePath string, numColors int) ([]Color, error) {
 		}
 	}
 
-	type colorFreq struct {
+	type colorScore struct {
 		Hex   string
 		Count int
+		Score float64
 	}
-	var frequencies []colorFreq
+	var scored []colorScore
 	for hexStr, count := range colorCounts {
-		frequencies = append(frequencies, colorFreq{Hex: hexStr, Count: count})
+		var r, g, b int
+		fmt.Sscanf(hexStr, "#%02x%02x%02x", &r, &g, &b)
+
+		// Calculate HSL saturation and lightness
+		rf := float64(r) / 255.0
+		gf := float64(g) / 255.0
+		bf := float64(b) / 255.0
+
+		maxC := math.Max(rf, math.Max(gf, bf))
+		minC := math.Min(rf, math.Min(gf, bf))
+		lightness := (maxC + minC) / 2.0
+
+		saturation := 0.0
+		if maxC != minC {
+			if lightness <= 0.5 {
+				saturation = (maxC - minC) / (maxC + minC)
+			} else {
+				saturation = (maxC - minC) / (2.0 - maxC - minC)
+			}
+		}
+
+		// Vibrancy multiplier: penalize near-black, near-white, and low-saturation (grey) colors
+		vibrancy := 1.0
+		if lightness < 0.08 || lightness > 0.92 {
+			// Near-black or near-white: heavy penalty
+			vibrancy = 0.1
+		} else if lightness < 0.15 || lightness > 0.85 {
+			// Very dark or very light: moderate penalty
+			vibrancy = 0.3
+		} else if saturation < 0.1 {
+			// Desaturated greys: heavy penalty
+			vibrancy = 0.15
+		} else if saturation < 0.2 {
+			// Low saturation: moderate penalty
+			vibrancy = 0.4
+		}
+
+		// Boost mid-saturation and mid-lightness vibrant colors
+		satBoost := 1.0 + saturation*1.5
+
+		frequency := float64(count) / float64(totalPixels)
+		score := frequency * vibrancy * satBoost
+
+		scored = append(scored, colorScore{Hex: hexStr, Count: count, Score: score})
 	}
 
-	sort.Slice(frequencies, func(i, j int) bool {
-		return frequencies[i].Count > frequencies[j].Count
+	sort.Slice(scored, func(i, j int) bool {
+		return scored[i].Score > scored[j].Score
 	})
 
 	var palette []Color
-	for i := 0; i < len(frequencies) && i < numColors; i++ {
+	for i := 0; i < len(scored) && i < numColors; i++ {
 		var r, g, b int
-		fmt.Sscanf(frequencies[i].Hex, "#%02x%02x%02x", &r, &g, &b)
+		fmt.Sscanf(scored[i].Hex, "#%02x%02x%02x", &r, &g, &b)
 
 		weight := 0.0
 		if totalPixels > 0 {
-			weight = float64(frequencies[i].Count) / float64(totalPixels)
+			weight = float64(scored[i].Count) / float64(totalPixels)
 		}
 
 		palette = append(palette, Color{
 			R:      r,
 			G:      g,
 			B:      b,
-			Hex:    frequencies[i].Hex,
+			Hex:    scored[i].Hex,
 			Weight: weight,
 		})
 	}
