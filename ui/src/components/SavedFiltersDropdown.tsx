@@ -296,7 +296,7 @@ const SavedFiltersDropdown: React.FC<SavedFiltersDropdownProps> = ({
                     <button
                       type="button"
                       onClick={(e) => handleOverwrite(filter, e)}
-                      className="p-0.5 rounded hover:bg-[#60a5fa]/20 text-gray-500 hover:text-[#60a5fa] transition-colors"
+                      className="p-0.5 rounded hover:bg-[#60a5fa]/20 text-gray-500 hover:text-[#60a5fa] transition-colors cursor-pointer"
                       title={`Overwrite "${filter.name}" with current filters`}
                     >
                       {/* Save/floppy disk icon */}
@@ -316,7 +316,7 @@ const SavedFiltersDropdown: React.FC<SavedFiltersDropdownProps> = ({
                     <button
                       type="button"
                       onClick={(e) => handleDelete(filter, e)}
-                      className="p-0.5 rounded hover:bg-red-500/20 text-gray-500 hover:text-red-400 transition-colors"
+                      className="p-0.5 rounded hover:bg-red-500/20 text-gray-500 hover:text-red-400 transition-colors cursor-pointer"
                       title={`Delete "${filter.name}"`}
                     >
                       <svg
@@ -355,7 +355,7 @@ const SavedFiltersDropdown: React.FC<SavedFiltersDropdownProps> = ({
                   type="button"
                   onClick={handleSaveNew}
                   disabled={!newName.trim()}
-                  className="px-2 py-1 rounded bg-[#60a5fa]/20 text-[#60a5fa] text-xs hover:bg-[#60a5fa]/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="px-2 py-1 rounded bg-[#60a5fa]/20 text-[#60a5fa] text-xs hover:bg-[#60a5fa]/30 transition-colors disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
                 >
                   Save
                 </button>
@@ -366,7 +366,7 @@ const SavedFiltersDropdown: React.FC<SavedFiltersDropdownProps> = ({
                     setNewName('');
                     setError(null);
                   }}
-                  className="px-1.5 py-1 rounded text-gray-500 text-xs hover:text-gray-300 transition-colors"
+                  className="px-1.5 py-1 rounded text-gray-500 text-xs hover:text-gray-300 transition-colors cursor-pointer"
                 >
                   ✕
                 </button>

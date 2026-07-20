@@ -24,7 +24,7 @@ const FavoriteStar: React.FC<FavoriteStarProps> = ({
         onToggle();
       }}
       aria-label={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
-      className={`rounded-full p-1 transition-colors ${
+      className={`rounded-full p-1 transition-colors cursor-pointer ${
         isFavorite
           ? 'text-yellow-400 hover:text-yellow-300'
           : 'text-gray-400 hover:text-yellow-400'

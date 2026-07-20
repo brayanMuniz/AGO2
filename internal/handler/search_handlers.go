@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -39,7 +40,7 @@ func loadTagToCategoryJSON(jsonPath string) {
 	})
 }
 
-// GET /api/search?tags=tag1+tag2
+// GET /api/search?tags=tag1+tag2&limit=50&offset=0&sort_by=id&sort_order=desc
 func (a *App) handleSearch(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		sendJSONError(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -52,10 +53,27 @@ func (a *App) handleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	limit := 50
+	if lStr := r.URL.Query().Get("limit"); lStr != "" {
+		if l, err := strconv.Atoi(lStr); err == nil {
+			limit = l
+		}
+	}
+
+	offset := 0
+	if oStr := r.URL.Query().Get("offset"); oStr != "" {
+		if o, err := strconv.Atoi(oStr); err == nil && o >= 0 {
+			offset = o
+		}
+	}
+
+	sortBy := r.URL.Query().Get("sort_by")
+	sortOrder := r.URL.Query().Get("sort_order")
+
 	// "?tags=tag1+tag2" becomes "tag1 tag2".
 	tags := strings.Fields(tagsParam)
 
-	images, err := gallery.SearchImagesByTags(a.DB, tags)
+	images, totalCount, err := gallery.SearchImages(a.DB, tags, limit, offset, sortBy, sortOrder)
 	if err != nil {
 		sendJSONError(w, "Failed to search images", http.StatusInternalServerError)
 		fmt.Printf("Database error searching tags %v: %v\n", tags, err)
@@ -68,7 +86,10 @@ func (a *App) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(images)
+	json.NewEncoder(w).Encode(map[string]any{
+		"images":      images,
+		"total_count": totalCount,
+	})
 }
 
 // GET /api/tags/autocomplete?query=...&category=...

@@ -127,7 +127,7 @@ const RenderDualSlider = ({
           {!isDefault && (
             <button
               onClick={() => onChange(min, max)}
-              className="text-xs text-red-400 hover:text-red-300 transition-colors"
+              className="text-xs text-red-400 hover:text-red-300 transition-colors cursor-pointer"
             >
               Reset
             </button>
@@ -180,10 +180,17 @@ const SearchPage: React.FC = () => {
 
   const urlSort = (searchParams.get('sort') as any) || 'none';
   const urlOrder = (searchParams.get('order') as any) || 'desc';
+  const urlLimit = parseInt(searchParams.get('limit') || '50', 10);
+  const urlPage = parseInt(searchParams.get('page') || '1', 10);
 
   const [sortBy, setSortBy] = useState<string>(urlSort);
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>(urlOrder);
   const [randomSeed, setRandomSeed] = useState(() => Math.random());
+
+  const [pageSize, setPageSize] = useState<number>(urlLimit > 0 ? urlLimit : 50);
+  const [currentPage, setCurrentPage] = useState<number>(urlPage > 0 ? urlPage : 1);
+  const [totalResults, setTotalResults] = useState<number>(0);
+  const [zoomSize, setZoomSize] = useState<number>(240);
 
   const [brightness, setBrightness] = useState<[number, number]>([0, 255]);
   const [color, setColor] = useState<string>('#000000');
@@ -203,16 +210,26 @@ const SearchPage: React.FC = () => {
   const isUnorganized = /(?:^|\s)(?:is:unorganized|is:missing)(?:\s|$)/.test(tagsQuery);
   const isAnyStatus = !isOrganized && !isUnorganized;
 
-  const updateUrlParams = (newTags?: string, newSort?: string, newOrder?: string) => {
+  const updateUrlParams = (
+    newTags?: string,
+    newSort?: string,
+    newOrder?: string,
+    newLimit?: number,
+    newPage?: number,
+  ) => {
     const t = newTags !== undefined ? newTags : tagsQuery;
     const s = newSort !== undefined ? newSort : sortBy;
     const o = newOrder !== undefined ? newOrder : sortOrder;
+    const l = newLimit !== undefined ? newLimit : pageSize;
+    const p = newPage !== undefined ? newPage : currentPage;
     const params: Record<string, string> = {};
     if (t) params.tags = t;
     if (s && s !== 'none') {
       params.sort = s;
       if (o) params.order = o;
     }
+    if (l && l !== 50) params.limit = l.toString();
+    if (p && p > 1) params.page = p.toString();
     setSearchParams(params);
   };
 
@@ -269,21 +286,37 @@ const SearchPage: React.FC = () => {
     const fetchImages = async () => {
       if (!tagsQuery) {
         setImages([]);
+        setTotalResults(0);
         return;
       }
 
       setLoading(true);
       setError(null);
 
+      const offset = (currentPage - 1) * pageSize;
+      const queryParams = new URLSearchParams({
+        tags: tagsQuery,
+        limit: pageSize.toString(),
+        offset: offset.toString(),
+      });
+      if (sortBy && sortBy !== 'none') {
+        queryParams.set('sort_by', sortBy);
+        queryParams.set('sort_order', sortOrder);
+      }
+
       try {
-        const response = await fetch(`/api/search?tags=${encodeURIComponent(tagsQuery)}`);
+        const response = await fetch(`/api/search?${queryParams.toString()}`);
         if (!response.ok) {
           throw new Error('Failed to search images.');
         }
 
-        const data: ImageData[] = await response.json();
-        setImages(data || []);
-        setKnownTags((prev) => mergeSuggestions(prev, buildSuggestionsFromImages(data || [])));
+        const data = await response.json();
+        const fetchedImages: ImageData[] = Array.isArray(data) ? data : (data.images || []);
+        const count: number = Array.isArray(data) ? data.length : (data.total_count || 0);
+
+        setImages(fetchedImages);
+        setTotalResults(count);
+        setKnownTags((prev) => mergeSuggestions(prev, buildSuggestionsFromImages(fetchedImages)));
       } catch (err: any) {
         setError(err.message || 'An unknown error occurred.');
       } finally {
@@ -292,7 +325,7 @@ const SearchPage: React.FC = () => {
     };
 
     fetchImages();
-  }, [tagsQuery]);
+  }, [tagsQuery, pageSize, currentPage, sortBy, sortOrder]);
 
   useEffect(() => {
     if (!draftInput.trim()) {
@@ -617,49 +650,94 @@ const SearchPage: React.FC = () => {
     }
   };
 
-  const sortedImages = useMemo(() => {
-    if (sortBy === 'none') {
-      return images;
-    }
+  const sortedImages = images;
 
-    return [...images].sort((a, b) => {
-      if (sortBy === 'random') {
-        const hashA = Math.sin(a.id * 9999 + randomSeed * 100000);
-        const hashB = Math.sin(b.id * 9999 + randomSeed * 100000);
-        return hashA - hashB;
-      }
+  const totalPages = Math.max(1, Math.ceil(totalResults / pageSize));
 
-      let valA = 0;
-      let valB = 0;
+  const renderPaginationBar = () => {
+    if (totalResults <= 0) return null;
+    return (
+      <div className="flex items-center justify-between py-2.5 px-4 bg-[#15151a]/80 border-b border-[#2a2a35] text-xs shrink-0">
+        <div className="text-gray-400">
+          Showing <span className="font-medium text-gray-200">{Math.min((currentPage - 1) * pageSize + 1, totalResults)}</span> to{' '}
+          <span className="font-medium text-gray-200">{Math.min(currentPage * pageSize, totalResults)}</span> of{' '}
+          <span className="font-medium text-gray-200">{totalResults}</span> images
+        </div>
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => {
+              setCurrentPage(1);
+              updateUrlParams(undefined, undefined, undefined, undefined, 1);
+            }}
+            disabled={currentPage <= 1 || pageSize <= 0 || loading}
+            className="px-2 py-1 rounded bg-[#1c1c24] border border-[#2a2a35] text-gray-300 hover:border-[#60a5fa] hover:text-[#60a5fa] disabled:opacity-40 disabled:pointer-events-none transition-colors cursor-pointer disabled:cursor-not-allowed"
+            title="First Page"
+          >
+            «
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              const prev = Math.max(1, currentPage - 1);
+              setCurrentPage(prev);
+              updateUrlParams(undefined, undefined, undefined, undefined, prev);
+            }}
+            disabled={currentPage <= 1 || loading}
+            className="px-2 py-1 rounded bg-[#1c1c24] border border-[#2a2a35] text-gray-300 hover:border-[#60a5fa] hover:text-[#60a5fa] disabled:opacity-40 disabled:pointer-events-none transition-colors"
+            title="Previous Page"
+          >
+            &lt;
+          </button>
 
-      if (sortBy === 'file_size') {
-        valA = a.main_data?.file_size || (a as any).file_size || 0;
-        valB = b.main_data?.file_size || (b as any).file_size || 0;
-      } else if (sortBy === 'dimensions') {
-        const widthA = a.main_data?.image_width || (a as any).image_width || 0;
-        const heightA = a.main_data?.image_height || (a as any).image_height || 0;
-        valA = widthA * heightA;
+          <div className="flex items-center gap-1 mx-1">
+            <select
+              value={currentPage}
+              onChange={(e) => {
+                const p = Number(e.target.value);
+                setCurrentPage(p);
+                updateUrlParams(undefined, undefined, undefined, undefined, p);
+              }}
+              disabled={pageSize <= 0 || loading}
+              className="bg-[#1c1c24] border border-[#2a2a35] text-gray-200 font-medium rounded px-2 py-1 outline-none focus:border-[#60a5fa] cursor-pointer disabled:cursor-not-allowed"
+            >
+              {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
+                <option key={p} value={p}>
+                  Page {p} of {totalPages}
+                </option>
+              ))}
+            </select>
+          </div>
 
-        const widthB = b.main_data?.image_width || (b as any).image_width || 0;
-        const heightB = b.main_data?.image_height || (b as any).image_height || 0;
-        valB = widthB * heightB;
-      } else if (sortBy === 'created_at') {
-        valA = (a as any).created_at ? new Date((a as any).created_at).getTime() : a.id;
-        valB = (b as any).created_at ? new Date((b as any).created_at).getTime() : b.id;
-      } else if (sortBy === 'id') {
-        valA = a.id;
-        valB = b.id;
-      } else if (sortBy === 'rating') {
-        const ratingOrder: Record<string, number> = { g: 1, s: 2, q: 3, e: 4 };
-        valA = ratingOrder[a.main_data?.rating || 'g'] || 0;
-        valB = ratingOrder[b.main_data?.rating || 'g'] || 0;
-      }
-
-      if (valA < valB) return sortOrder === 'asc' ? -1 : 1;
-      if (valA > valB) return sortOrder === 'asc' ? 1 : -1;
-      return 0;
-    });
-  }, [images, sortBy, sortOrder, randomSeed]);
+          <button
+            type="button"
+            onClick={() => {
+              const next = Math.min(totalPages, currentPage + 1);
+              setCurrentPage(next);
+              updateUrlParams(undefined, undefined, undefined, undefined, next);
+            }}
+            disabled={currentPage >= totalPages || pageSize <= 0 || loading}
+            className="px-2 py-1 rounded bg-[#1c1c24] border border-[#2a2a35] text-gray-300 hover:border-[#60a5fa] hover:text-[#60a5fa] disabled:opacity-40 disabled:pointer-events-none transition-colors cursor-pointer disabled:cursor-not-allowed"
+            title="Next Page"
+          >
+            &gt;
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setCurrentPage(totalPages);
+              updateUrlParams(undefined, undefined, undefined, undefined, totalPages);
+            }}
+            disabled={currentPage >= totalPages || pageSize <= 0 || loading}
+            className="px-2 py-1 rounded bg-[#1c1c24] border border-[#2a2a35] text-gray-300 hover:border-[#60a5fa] hover:text-[#60a5fa] disabled:opacity-40 disabled:pointer-events-none transition-colors cursor-pointer disabled:cursor-not-allowed"
+            title="Last Page"
+          >
+            »
+          </button>
+        </div>
+      </div>
+    );
+  };
 
   const startQueue = () => {
     if (sortedImages.length === 0) return;
@@ -707,7 +785,7 @@ const SearchPage: React.FC = () => {
                     e.stopPropagation();
                     handleExcludeTag(category, tag.name);
                   }}
-                  className={`shrink-0 w-5 h-5 flex items-center justify-center rounded transition-all ${
+                  className={`shrink-0 w-5 h-5 flex items-center justify-center rounded transition-all cursor-pointer ${
                     isActive
                       ? 'text-red-400/70 hover:text-red-300 hover:bg-red-500/15'
                       : 'text-gray-600 opacity-0 group-hover/tag:opacity-100 hover:text-red-400 hover:bg-red-500/10'
@@ -727,7 +805,7 @@ const SearchPage: React.FC = () => {
             <button
               type="button"
               onClick={() => toggleCategoryExpanded(category)}
-              className="text-xs text-[#60a5fa] hover:text-[#93c5fd] transition-colors mt-0.5 mb-2 ml-1"
+              className="text-xs text-[#60a5fa] hover:text-[#93c5fd] transition-colors mt-0.5 mb-2 ml-1 cursor-pointer"
             >
               {isExpanded ? 'Show less' : `+ Show ${tags.length - 5} more`}
             </button>
@@ -811,7 +889,7 @@ const SearchPage: React.FC = () => {
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Palette Match</span>
                   {hasColor && (
-                    <button onClick={handleClearColor} className="text-xs text-red-400 hover:text-red-300 transition-colors">
+                    <button onClick={handleClearColor} className="text-xs text-red-400 hover:text-red-300 transition-colors cursor-pointer">
                       Clear
                     </button>
                   )}
@@ -897,7 +975,7 @@ const SearchPage: React.FC = () => {
                   <button
                     type="button"
                     onClick={handleAddCurrentColorToPalette}
-                    className="px-2.5 py-1.5 bg-[#2563eb] hover:bg-[#1d4ed8] text-white rounded text-xs font-medium transition-colors shrink-0"
+                    className="px-2.5 py-1.5 bg-[#2563eb] hover:bg-[#1d4ed8] text-white rounded text-xs font-medium transition-colors shrink-0 cursor-pointer"
                   >
                     Add Color
                   </button>
@@ -906,7 +984,7 @@ const SearchPage: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => setIsSavingPalette(true)}
-                      className="px-2.5 py-1.5 bg-[#2a2a35] hover:bg-[#3a3a45] text-gray-200 border border-[#3e3957] rounded text-xs transition-colors shrink-0 flex items-center gap-1"
+                      className="px-2.5 py-1.5 bg-[#2a2a35] hover:bg-[#3a3a45] text-gray-200 border border-[#3e3957] rounded text-xs transition-colors shrink-0 flex items-center gap-1 cursor-pointer"
                       title="Save current palette"
                     >
                       Save Palette
@@ -927,7 +1005,7 @@ const SearchPage: React.FC = () => {
                     <button
                       type="submit"
                       disabled={!newPaletteName.trim()}
-                      className="px-2.5 py-1 bg-[#2563eb] hover:bg-[#1d4ed8] disabled:opacity-50 text-white rounded text-xs font-medium transition-colors"
+                      className="px-2.5 py-1 bg-[#2563eb] hover:bg-[#1d4ed8] disabled:opacity-50 text-white rounded text-xs font-medium transition-colors cursor-pointer disabled:cursor-not-allowed"
                     >
                       Save
                     </button>
@@ -937,7 +1015,7 @@ const SearchPage: React.FC = () => {
                         setIsSavingPalette(false);
                         setNewPaletteName('');
                       }}
-                      className="px-2 py-1 bg-[#2a2a35] hover:bg-[#3a3a45] text-gray-300 rounded text-xs transition-colors"
+                      className="px-2.5 py-1 bg-[#2a2a35] hover:bg-[#3a3a45] text-gray-300 rounded text-xs transition-colors cursor-pointer"
                     >
                       Cancel
                     </button>
@@ -968,7 +1046,7 @@ const SearchPage: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => updateStatusFilter(null)}
-                  className={`px-2.5 py-1 rounded text-xs transition-colors border ${isAnyStatus
+                  className={`px-2.5 py-1 rounded text-xs transition-colors border cursor-pointer ${isAnyStatus
                     ? 'border-[#60a5fa] bg-[#60a5fa]/20 text-[#93c5fd]'
                     : 'border-[#2a2a35] bg-[#111115] text-gray-400 hover:text-gray-200'
                     }`}
@@ -978,7 +1056,7 @@ const SearchPage: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => updateStatusFilter('organized')}
-                  className={`px-2.5 py-1 rounded text-xs transition-colors border ${isOrganized
+                  className={`px-2.5 py-1 rounded text-xs transition-colors border cursor-pointer ${isOrganized
                     ? 'border-[#60a5fa] bg-[#60a5fa]/20 text-[#93c5fd]'
                     : 'border-[#2a2a35] bg-[#111115] text-gray-400 hover:text-gray-200'
                     }`}
@@ -988,7 +1066,7 @@ const SearchPage: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => updateStatusFilter('unorganized')}
-                  className={`px-2.5 py-1 rounded text-xs transition-colors border ${isUnorganized
+                  className={`px-2.5 py-1 rounded text-xs transition-colors border cursor-pointer ${isUnorganized
                     ? 'border-[#60a5fa] bg-[#60a5fa]/20 text-[#93c5fd]'
                     : 'border-[#2a2a35] bg-[#111115] text-gray-400 hover:text-gray-200'
                     }`}
@@ -1001,7 +1079,7 @@ const SearchPage: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => updateSpecialFilter('is:duplicate', isDuplicate ? null : 'is:duplicate')}
-                  className={`px-2.5 py-1 rounded text-xs transition-colors border ${isDuplicate
+                  className={`px-2.5 py-1 rounded text-xs transition-colors border cursor-pointer ${isDuplicate
                     ? 'border-[#60a5fa] bg-[#60a5fa]/20 text-[#93c5fd]'
                     : 'border-[#2a2a35] bg-[#111115] text-gray-400 hover:text-gray-200'
                     }`}
@@ -1089,7 +1167,39 @@ const SearchPage: React.FC = () => {
               </button>
             </div>
 
-            <span className="text-gray-400">{images.length} result(s)</span>
+            <div className="flex items-center gap-2 pr-4 border-r border-[#2a2a35]">
+              <span className="text-gray-500 font-medium">Per page:</span>
+              <select
+                value={pageSize}
+                onChange={(e) => {
+                  const val = Number(e.target.value);
+                  setPageSize(val);
+                  setCurrentPage(1);
+                  updateUrlParams(undefined, undefined, undefined, val, 1);
+                }}
+                className="bg-[#1c1c24] border border-[#2a2a35] text-gray-300 rounded px-2 py-1.5 outline-none focus:border-[#60a5fa] transition-colors cursor-pointer"
+              >
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+                <option value={250}>250</option>
+                <option value={500}>500</option>
+                <option value={-1}>All</option>
+              </select>
+            </div>
+
+            <div className="flex items-center gap-2 pr-4 border-r border-[#2a2a35]">
+              <span className="text-gray-500 font-medium">Zoom:</span>
+              <input
+                type="range"
+                min={220}
+                max={680}
+                step={10}
+                value={zoomSize}
+                onChange={(e) => setZoomSize(Number(e.target.value))}
+                className="w-24 md:w-32 accent-[#60a5fa] bg-[#1c1c24] h-1.5 rounded-lg cursor-pointer"
+                title={`Grid column width: ${zoomSize}px`}
+              />
+            </div>
 
             <div className="ml-auto flex items-center gap-2">
               {sortedImages.length > 0 && !selectionMode && (
@@ -1117,7 +1227,7 @@ const SearchPage: React.FC = () => {
                     }
                   }}
                   disabled={isDeleting}
-                  className="px-2.5 py-1.5 rounded border border-[#2a2a35] text-gray-400 hover:text-gray-200 transition-colors disabled:opacity-50"
+                  className="px-2.5 py-1.5 rounded border border-[#2a2a35] text-gray-400 hover:text-gray-200 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {allImagesSelected ? 'Deselect All' : 'Select All'}
                 </button>
@@ -1130,7 +1240,7 @@ const SearchPage: React.FC = () => {
                   setSelectedIds(new Set());
                 }}
                 disabled={isDeleting}
-                className={`px-2.5 py-1.5 rounded border transition-colors disabled:opacity-50 ${selectionMode
+                className={`px-2.5 py-1.5 rounded border transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 ${selectionMode
                   ? 'border-[#60a5fa] text-[#93c5fd] bg-[#60a5fa]/10'
                   : 'border-[#2a2a35] text-gray-400 hover:text-gray-200'
                   }`}
@@ -1144,7 +1254,7 @@ const SearchPage: React.FC = () => {
                     type="button"
                     onClick={handleExtractPaletteFromSelected}
                     disabled={isDeleting || isExtractingPalette}
-                    className="px-2.5 py-1.5 rounded border border-purple-500/50 text-purple-300 hover:bg-purple-500/20 hover:text-purple-200 hover:border-purple-400 disabled:opacity-50 transition-colors flex items-center gap-1.5"
+                    className="px-2.5 py-1.5 rounded border border-purple-500/50 text-purple-300 hover:bg-purple-500/20 hover:text-purple-200 hover:border-purple-400 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 flex items-center gap-1.5"
                   >
                     {isExtractingPalette ? 'Extracting...' : `Extract Palette (${selectedImageIds.length})`}
                   </button>
@@ -1153,7 +1263,7 @@ const SearchPage: React.FC = () => {
                     type="button"
                     onClick={() => setShowExportModal(true)}
                     disabled={isDeleting}
-                    className="px-2.5 py-1.5 rounded border border-[#2a2a35] text-gray-300 hover:text-white hover:border-[#60a5fa] disabled:opacity-50 transition-colors"
+                    className="px-2.5 py-1.5 rounded border border-[#2a2a35] text-gray-300 hover:text-white hover:border-[#60a5fa] transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     Export ({selectedImageIds.length})
                   </button>
@@ -1162,7 +1272,7 @@ const SearchPage: React.FC = () => {
                     type="button"
                     onClick={handleBatchDelete}
                     disabled={isDeleting}
-                    className="px-2.5 py-1.5 rounded border border-red-500/50 text-red-400 hover:bg-red-500/20 hover:text-red-300 hover:border-red-500 disabled:opacity-50 transition-colors"
+                    className="px-2.5 py-1.5 rounded border border-red-500/50 text-red-400 hover:bg-red-500/20 hover:text-red-300 hover:border-red-500 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {isDeleting ? 'Deleting...' : `Delete (${selectedImageIds.length})`}
                   </button>
@@ -1170,6 +1280,8 @@ const SearchPage: React.FC = () => {
               )}
             </div>
           </div>
+
+          {renderPaginationBar()}
 
           <div className="flex-1 overflow-y-auto p-4 hide-scrollbar">
             {loading ? (
@@ -1181,65 +1293,80 @@ const SearchPage: React.FC = () => {
                 {tagsQuery ? 'No images found for these tags.' : 'Add tags or filters to search.'}
               </div>
             ) : (
-              <div className="flex flex-wrap gap-4 content-start">
-                {sortedImages.map((img) => {
-                  const isSelected = selectedIds.has(img.id);
-                  return (
-                    <div key={img.id} className="relative group">
-                      <Link
-                        to={selectionMode ? '#' : `/image/${img.id}?queue=true`}
-                        onClick={(event) => {
-                          if (selectionMode) {
-                            event.preventDefault();
-                            if (!isDeleting) toggleSelected(img.id);
-                          } else {
-                            startQueue();
-                          }
-                        }}
-                        className={`block relative rounded transition-all duration-200 ${selectionMode && isSelected
-                          ? 'ring-2 ring-[#60a5fa] bg-[#60a5fa]/10 scale-[0.98]'
-                          : 'hover:ring-1 hover:ring-[#60a5fa]'
+              <>
+                <div
+                  className="grid gap-4 content-start"
+                  style={{
+                    gridTemplateColumns: `repeat(auto-fill, minmax(${zoomSize}px, 1fr))`,
+                  }}
+                >
+                  {sortedImages.map((img) => {
+                    const isSelected = selectedIds.has(img.id);
+                    return (
+                      <div key={img.id} className="relative group w-full">
+                        <Link
+                          to={selectionMode ? '#' : `/image/${img.id}?queue=true`}
+                          onClick={(event) => {
+                            if (selectionMode) {
+                              event.preventDefault();
+                              if (!isDeleting) toggleSelected(img.id);
+                            } else {
+                              startQueue();
+                            }
+                          }}
+                          className={`block relative rounded transition-all duration-200 ${
+                            selectionMode && isSelected
+                              ? 'ring-2 ring-[#60a5fa] bg-[#60a5fa]/10 scale-[0.98]'
+                              : 'hover:ring-1 hover:ring-[#60a5fa]'
                           } ${isDeleting ? 'pointer-events-none' : ''}`}
-                      >
-                        <div className={`bg-[#111115] p-1 rounded ${selectionMode && isSelected ? 'opacity-80' : ''}`}>
-                          <img
-                            src={`${img.thumbnail_path ? img.thumbnail_path : `/images/${img.file_name}`}?v=${img.file_size || ''}`}
-                            alt={`Post ${img.id}`}
-                            className="object-contain"
-                            style={{ maxWidth: '250px', maxHeight: '250px' }}
-                            loading="lazy"
-                          />
-                        </div>
-
-                        {selectionMode && (
-                          <div className="absolute top-2 left-2 z-10 pointer-events-none bg-black/40 rounded-sm">
-                            <input
-                              type="checkbox"
-                              readOnly
-                              checked={isSelected}
-                              className="accent-[#60a5fa] pointer-events-none m-1 block"
-                            />
-                          </div>
-                        )}
-
-                        {!selectionMode && (
+                        >
                           <div
-                            className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
-                            onClick={(e) => e.preventDefault()}
+                            className={`bg-[#111115] p-1 rounded flex items-center justify-center overflow-hidden ${
+                              selectionMode && isSelected ? 'opacity-80' : ''
+                            }`}
+                            style={{ height: `${zoomSize}px` }}
                           >
-                            <FavoriteStar
-                              isFavorite={img.is_favorite ?? false}
-                              onToggle={() => handleToggleFavorite(img.id, img.is_favorite ?? false)}
-                              size="sm"
-                              className="bg-black/60"
+                            <img
+                              src={`${img.thumbnail_path ? img.thumbnail_path : `/images/${img.file_name}`}?v=${img.file_size || ''}`}
+                              alt={`Post ${img.id}`}
+                              className="object-contain w-full h-full"
+                              loading="lazy"
                             />
                           </div>
-                        )}
-                      </Link>
-                    </div>
-                  );
-                })}
-              </div>
+
+                          {selectionMode && (
+                            <div className="absolute top-2 left-2 z-10 pointer-events-none bg-black/40 rounded-sm">
+                              <input
+                                type="checkbox"
+                                readOnly
+                                checked={isSelected}
+                                className="accent-[#60a5fa] pointer-events-none m-1 block"
+                              />
+                            </div>
+                          )}
+
+                          {!selectionMode && (
+                            <div
+                              className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                              onClick={(e) => e.preventDefault()}
+                            >
+                              <FavoriteStar
+                                isFavorite={img.is_favorite ?? false}
+                                onToggle={() => handleToggleFavorite(img.id, img.is_favorite ?? false)}
+                                size="sm"
+                                className="bg-black/60"
+                              />
+                            </div>
+                          )}
+                        </Link>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="mt-6 border-t border-[#2a2a35] pt-2">
+                  {renderPaginationBar()}
+                </div>
+              </>
             )}
           </div>
         </main>
