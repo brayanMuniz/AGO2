@@ -1,62 +1,16 @@
-package main
+package storage
 
 import (
 	"database/sql"
 	"fmt"
 	"sort"
+
+	"github.com/brayanMuniz/AGO2/internal/models"
 )
 
-// --- Structs ---
-
-type LibraryStats struct {
-	TotalImages      int   `json:"total_images"`
-	TotalDuplicates  int   `json:"total_duplicates"`
-	TotalFavorites   int   `json:"total_favorites"`
-	TotalDiskSpace   int64 `json:"total_disk_space"`
-	UnorganizedQueue int   `json:"unorganized_queue"`
-}
-
-type TagLeaderboardEntry struct {
-	Name     string `json:"name"`
-	Category string `json:"category"`
-	Count    int    `json:"count"`
-}
-
-type RatingDistribution struct {
-	Rating string `json:"rating"`
-	Count  int    `json:"count"`
-}
-
-type PredictiveTagEntry struct {
-	Name            string  `json:"name"`
-	TotalCount      int     `json:"total_count"`
-	GeneralPct      float64 `json:"general_pct"`
-	SensitivePct    float64 `json:"sensitive_pct"`
-	QuestionablePct float64 `json:"questionable_pct"`
-	ExplicitPct     float64 `json:"explicit_pct"`
-}
-
-type ArtistProfile struct {
-	Name            string                `json:"name"`
-	TotalCount      int                   `json:"total_count"`
-	FavoriteCount   int                   `json:"favorite_count"`
-	RatingBreakdown map[string]int        `json:"rating_breakdown"`
-	TopTags         []TagLeaderboardEntry `json:"top_tags"`
-}
-
-type StatsPayload struct {
-	Library            LibraryStats                     `json:"library"`
-	TagLeaderboards    map[string][]TagLeaderboardEntry `json:"tag_leaderboards"`
-	TagLeaderboardsFav map[string][]TagLeaderboardEntry `json:"tag_leaderboards_favorites"`
-	RatingDist         []RatingDistribution             `json:"rating_distribution"`
-	PredictiveByRating map[string][]PredictiveTagEntry  `json:"predictive_by_rating"`
-	ArtistProfiles     []ArtistProfile                  `json:"artist_profiles"`
-}
-
-// --- Query Functions ---
-
-func GetLibraryStats(db *sql.DB) (LibraryStats, error) {
-	var stats LibraryStats
+// GetLibraryStats returns aggregate counts for the entire library.
+func GetLibraryStats(db *sql.DB) (models.LibraryStats, error) {
+	var stats models.LibraryStats
 
 	query := `
 		SELECT
@@ -82,7 +36,8 @@ func GetLibraryStats(db *sql.DB) (LibraryStats, error) {
 	return stats, nil
 }
 
-func GetTagLeaderboard(db *sql.DB, category string, limit int) ([]TagLeaderboardEntry, error) {
+// GetTagLeaderboard returns the most frequently used tags in a given category.
+func GetTagLeaderboard(db *sql.DB, category string, limit int) ([]models.TagLeaderboardEntry, error) {
 	query := `
 		SELECT t.name, t.category, COUNT(*) as cnt
 		FROM tags t
@@ -108,9 +63,9 @@ func GetTagLeaderboard(db *sql.DB, category string, limit int) ([]TagLeaderboard
 	}
 	defer rows.Close()
 
-	var entries []TagLeaderboardEntry
+	var entries []models.TagLeaderboardEntry
 	for rows.Next() {
-		var e TagLeaderboardEntry
+		var e models.TagLeaderboardEntry
 		if err := rows.Scan(&e.Name, &e.Category, &e.Count); err != nil {
 			return nil, fmt.Errorf("failed to scan tag leaderboard entry: %w", err)
 		}
@@ -122,13 +77,14 @@ func GetTagLeaderboard(db *sql.DB, category string, limit int) ([]TagLeaderboard
 	}
 
 	if entries == nil {
-		entries = make([]TagLeaderboardEntry, 0)
+		entries = make([]models.TagLeaderboardEntry, 0)
 	}
 
 	return entries, nil
 }
 
-func GetTagLeaderboardByFavorites(db *sql.DB, category string, limit int) ([]TagLeaderboardEntry, error) {
+// GetTagLeaderboardByFavorites returns the most frequently used tags among favorited images.
+func GetTagLeaderboardByFavorites(db *sql.DB, category string, limit int) ([]models.TagLeaderboardEntry, error) {
 	query := `
 		SELECT t.name, t.category, COUNT(*) as cnt
 		FROM tags t
@@ -154,9 +110,9 @@ func GetTagLeaderboardByFavorites(db *sql.DB, category string, limit int) ([]Tag
 	}
 	defer rows.Close()
 
-	var entries []TagLeaderboardEntry
+	var entries []models.TagLeaderboardEntry
 	for rows.Next() {
-		var e TagLeaderboardEntry
+		var e models.TagLeaderboardEntry
 		if err := rows.Scan(&e.Name, &e.Category, &e.Count); err != nil {
 			return nil, fmt.Errorf("failed to scan favorites tag leaderboard entry: %w", err)
 		}
@@ -168,13 +124,14 @@ func GetTagLeaderboardByFavorites(db *sql.DB, category string, limit int) ([]Tag
 	}
 
 	if entries == nil {
-		entries = make([]TagLeaderboardEntry, 0)
+		entries = make([]models.TagLeaderboardEntry, 0)
 	}
 
 	return entries, nil
 }
 
-func GetRatingDistribution(db *sql.DB) ([]RatingDistribution, error) {
+// GetRatingDistribution returns the count of images for each rating value.
+func GetRatingDistribution(db *sql.DB) ([]models.RatingDistribution, error) {
 	query := `
 		SELECT COALESCE(m.rating, 'unknown') as rating, COUNT(*) as cnt
 		FROM files f
@@ -189,9 +146,9 @@ func GetRatingDistribution(db *sql.DB) ([]RatingDistribution, error) {
 	}
 	defer rows.Close()
 
-	var dist []RatingDistribution
+	var dist []models.RatingDistribution
 	for rows.Next() {
-		var d RatingDistribution
+		var d models.RatingDistribution
 		if err := rows.Scan(&d.Rating, &d.Count); err != nil {
 			return nil, fmt.Errorf("failed to scan rating distribution: %w", err)
 		}
@@ -203,13 +160,14 @@ func GetRatingDistribution(db *sql.DB) ([]RatingDistribution, error) {
 	}
 
 	if dist == nil {
-		dist = make([]RatingDistribution, 0)
+		dist = make([]models.RatingDistribution, 0)
 	}
 
 	return dist, nil
 }
 
-func GetPredictiveTagAnalytics(db *sql.DB, minCount int, limit int) (map[string][]PredictiveTagEntry, error) {
+// GetPredictiveTagAnalytics computes per-rating percentages for general tags.
+func GetPredictiveTagAnalytics(db *sql.DB, minCount int, limit int) (map[string][]models.PredictiveTagEntry, error) {
 	query := `
 		SELECT
 			t.name,
@@ -233,9 +191,9 @@ func GetPredictiveTagAnalytics(db *sql.DB, minCount int, limit int) (map[string]
 	}
 	defer rows.Close()
 
-	var allTags []PredictiveTagEntry
+	var allTags []models.PredictiveTagEntry
 	for rows.Next() {
-		var e PredictiveTagEntry
+		var e models.PredictiveTagEntry
 		if err := rows.Scan(&e.Name, &e.TotalCount, &e.GeneralPct, &e.SensitivePct, &e.QuestionablePct, &e.ExplicitPct); err != nil {
 			return nil, fmt.Errorf("failed to scan predictive tag entry: %w", err)
 		}
@@ -246,15 +204,15 @@ func GetPredictiveTagAnalytics(db *sql.DB, minCount int, limit int) (map[string]
 		return nil, fmt.Errorf("error iterating predictive tag rows: %w", err)
 	}
 
-	result := make(map[string][]PredictiveTagEntry)
+	result := make(map[string][]models.PredictiveTagEntry)
 
 	ratings := []struct {
 		key  string
-		less func(slice []PredictiveTagEntry, i, j int) bool
+		less func(slice []models.PredictiveTagEntry, i, j int) bool
 	}{
 		{
 			key: "g",
-			less: func(slice []PredictiveTagEntry, i, j int) bool {
+			less: func(slice []models.PredictiveTagEntry, i, j int) bool {
 				if slice[i].GeneralPct == slice[j].GeneralPct {
 					return slice[i].TotalCount > slice[j].TotalCount
 				}
@@ -263,7 +221,7 @@ func GetPredictiveTagAnalytics(db *sql.DB, minCount int, limit int) (map[string]
 		},
 		{
 			key: "s",
-			less: func(slice []PredictiveTagEntry, i, j int) bool {
+			less: func(slice []models.PredictiveTagEntry, i, j int) bool {
 				if slice[i].SensitivePct == slice[j].SensitivePct {
 					return slice[i].TotalCount > slice[j].TotalCount
 				}
@@ -272,7 +230,7 @@ func GetPredictiveTagAnalytics(db *sql.DB, minCount int, limit int) (map[string]
 		},
 		{
 			key: "q",
-			less: func(slice []PredictiveTagEntry, i, j int) bool {
+			less: func(slice []models.PredictiveTagEntry, i, j int) bool {
 				if slice[i].QuestionablePct == slice[j].QuestionablePct {
 					return slice[i].TotalCount > slice[j].TotalCount
 				}
@@ -281,7 +239,7 @@ func GetPredictiveTagAnalytics(db *sql.DB, minCount int, limit int) (map[string]
 		},
 		{
 			key: "e",
-			less: func(slice []PredictiveTagEntry, i, j int) bool {
+			less: func(slice []models.PredictiveTagEntry, i, j int) bool {
 				if slice[i].ExplicitPct == slice[j].ExplicitPct {
 					return slice[i].TotalCount > slice[j].TotalCount
 				}
@@ -291,7 +249,7 @@ func GetPredictiveTagAnalytics(db *sql.DB, minCount int, limit int) (map[string]
 	}
 
 	for _, r := range ratings {
-		list := make([]PredictiveTagEntry, len(allTags))
+		list := make([]models.PredictiveTagEntry, len(allTags))
 		copy(list, allTags)
 		sort.Slice(list, func(i, j int) bool {
 			return r.less(list, i, j)
@@ -305,7 +263,8 @@ func GetPredictiveTagAnalytics(db *sql.DB, minCount int, limit int) (map[string]
 	return result, nil
 }
 
-func GetArtistProfiles(db *sql.DB, limit int) ([]ArtistProfile, error) {
+// GetArtistProfiles returns detailed profiles for the top artists.
+func GetArtistProfiles(db *sql.DB, limit int) ([]models.ArtistProfile, error) {
 	// Step 1: Get top artists by total image count
 	topArtists, err := GetTagLeaderboard(db, "artist", limit)
 	if err != nil {
@@ -313,13 +272,13 @@ func GetArtistProfiles(db *sql.DB, limit int) ([]ArtistProfile, error) {
 	}
 
 	if len(topArtists) == 0 {
-		return make([]ArtistProfile, 0), nil
+		return make([]models.ArtistProfile, 0), nil
 	}
 
-	profiles := make([]ArtistProfile, 0, len(topArtists))
+	profiles := make([]models.ArtistProfile, 0, len(topArtists))
 
 	for _, artist := range topArtists {
-		profile := ArtistProfile{
+		profile := models.ArtistProfile{
 			Name:            artist.Name,
 			TotalCount:      artist.Count,
 			RatingBreakdown: make(map[string]int),
@@ -382,9 +341,9 @@ func GetArtistProfiles(db *sql.DB, limit int) ([]ArtistProfile, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to get top tags for artist %s: %w", artist.Name, err)
 		}
-		var topTags []TagLeaderboardEntry
+		var topTags []models.TagLeaderboardEntry
 		for tagRows.Next() {
-			var e TagLeaderboardEntry
+			var e models.TagLeaderboardEntry
 			if err := tagRows.Scan(&e.Name, &e.Category, &e.Count); err != nil {
 				tagRows.Close()
 				return nil, fmt.Errorf("failed to scan top tag: %w", err)
@@ -394,7 +353,7 @@ func GetArtistProfiles(db *sql.DB, limit int) ([]ArtistProfile, error) {
 		tagRows.Close()
 
 		if topTags == nil {
-			topTags = make([]TagLeaderboardEntry, 0)
+			topTags = make([]models.TagLeaderboardEntry, 0)
 		}
 		profile.TopTags = topTags
 

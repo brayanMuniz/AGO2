@@ -2,75 +2,41 @@ package main
 
 import (
 	"fmt"
-	"github.com/joho/godotenv"
 	"log"
 	"net/http"
+
+	"github.com/joho/godotenv"
+
+	"github.com/brayanMuniz/AGO2/internal/config"
+	"github.com/brayanMuniz/AGO2/internal/danbooru"
+	"github.com/brayanMuniz/AGO2/internal/database"
+	"github.com/brayanMuniz/AGO2/internal/handler"
 )
 
 func main() {
-	database, err := InitDB("./gallery.db")
+	cfg := config.Default()
+
+	db, err := database.InitDB(cfg.DBPath)
 	if err != nil {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}
-	defer database.Close()
-
-	// Helper to prevent aggressive browser caching on replaced images and thumbnails
-	noCacheHandler := func(h http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-			w.Header().Set("Pragma", "no-cache")
-			w.Header().Set("Expires", "0")
-			h.ServeHTTP(w, r)
-		})
-	}
-
-	// reroute images for frontend
-	http.Handle("/images/", noCacheHandler(http.StripPrefix("/images/", http.FileServer(http.Dir("./Gallery")))))
-	http.Handle("/thumbnails/", noCacheHandler(http.StripPrefix("/thumbnails/", http.FileServer(http.Dir("./thumbnails")))))
+	defer db.Close()
 
 	_ = godotenv.Load("./.env")
 
-	userName, apiKey := GetDanbooruCredentials(database)
+	userName, apiKey := danbooru.GetCredentials(db)
 	if userName == "" || apiKey == "" {
 		fmt.Println("Warning: Danbooru userName or API key not configured. Please set them via Settings -> Danbooru.")
 	}
 
-	app := &App{
-		DB: database,
-	}
-
-	http.HandleFunc("GET /api/image/{id}", app.handleGetImage)
-	http.HandleFunc("GET /api/image/{id}/matches", app.handleGetImageMatches)
-	http.HandleFunc("GET /api/search", app.handleSearch)
-	http.HandleFunc("GET /api/process-gallery/status", app.handleGetJobStatus)
-	http.HandleFunc("GET /api/proxy-image", ProxyImageHandler)
-	http.HandleFunc("GET /api/tags/autocomplete", app.handleTagAutocomplete)
-	http.HandleFunc("GET /api/filters", app.handleGetSavedFilters)
-	http.HandleFunc("GET /api/palettes", app.handleGetSavedPalettes)
-	http.HandleFunc("GET /api/stats", app.handleGetStats)
-	http.HandleFunc("GET /api/settings/danbooru", app.handleGetDanbooruSettings)
-	http.HandleFunc("POST /api/settings/danbooru", app.handleSaveDanbooruSettings)
-
-	http.HandleFunc("POST /api/process-gallery", app.handleProcessGallery)
-	http.HandleFunc("POST /api/album/export", app.handleExportAlbum)
-	http.HandleFunc("POST /api/image/batch-delete", app.handleBatchDeleteImages)
-	http.HandleFunc("POST /api/filters", app.handleCreateSavedFilter)
-	http.HandleFunc("POST /api/palettes", app.handleCreateSavedPalette)
-	http.HandleFunc("POST /api/palettes/extract", app.handleExtractPaletteFromImages)
-	http.HandleFunc("POST /api/image/download-match", app.handleDownloadMatch)
-
-	http.HandleFunc("PATCH /api/image/{id}", app.handleImageUpdate)
-
-	http.HandleFunc("PUT /api/filters/{id}", app.handleUpdateSavedFilter)
-
-	http.HandleFunc("DELETE /api/image/{id}", app.handleDeleteImage)
-	http.HandleFunc("DELETE /api/filters/{id}", app.handleDeleteSavedFilter)
-	http.HandleFunc("DELETE /api/palettes/{id}", app.handleDeleteSavedPalette)
+	mux := http.NewServeMux()
+	app := &handler.App{DB: db, Cfg: cfg}
+	handler.RegisterRoutes(mux, app)
 
 	port := ":8080"
 	fmt.Printf("Server is running on http://localhost%s\n", port)
 
-	err = http.ListenAndServe(port, nil)
+	err = http.ListenAndServe(port, mux)
 	if err != nil {
 		log.Fatalf("Server failed to start: %v\n", err)
 	}

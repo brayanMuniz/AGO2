@@ -29,4 +29,7 @@ export interface ImageData {
   main_data: Post | null;
   thumbnail_path: string;
   has_duplicate?: number | null;
+  image_width: number;
+  image_height: number;
+  file_size: number;
 }

@@ -1,30 +1,23 @@
-package main
+package storage
 
 import (
 	"database/sql"
 	"fmt"
+
+	"github.com/brayanMuniz/AGO2/internal/models"
 )
 
-type SavedFilter struct {
-	ID        int64  `json:"id"`
-	Name      string `json:"name"`
-	Query     string `json:"query"`
-	SortBy    string `json:"sort_by"`
-	SortOrder string `json:"sort_order"`
-	CreatedAt string `json:"created_at"`
-	UpdatedAt string `json:"updated_at"`
-}
-
-func GetAllSavedFilters(db *sql.DB) ([]SavedFilter, error) {
+// GetAllSavedFilters returns all saved filter presets ordered by name.
+func GetAllSavedFilters(db *sql.DB) ([]models.SavedFilter, error) {
 	rows, err := db.Query("SELECT id, name, query, COALESCE(sort_by, 'none'), COALESCE(sort_order, 'desc'), created_at, updated_at FROM saved_filters ORDER BY name ASC")
 	if err != nil {
 		return nil, fmt.Errorf("failed to query saved filters: %w", err)
 	}
 	defer rows.Close()
 
-	var filters []SavedFilter
+	var filters []models.SavedFilter
 	for rows.Next() {
-		var f SavedFilter
+		var f models.SavedFilter
 		if err := rows.Scan(&f.ID, &f.Name, &f.Query, &f.SortBy, &f.SortOrder, &f.CreatedAt, &f.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan saved filter: %w", err)
 		}
@@ -33,7 +26,8 @@ func GetAllSavedFilters(db *sql.DB) ([]SavedFilter, error) {
 	return filters, rows.Err()
 }
 
-func CreateSavedFilter(db *sql.DB, name, query, sortBy, sortOrder string) (*SavedFilter, error) {
+// CreateSavedFilter inserts a new filter preset and returns it.
+func CreateSavedFilter(db *sql.DB, name, query, sortBy, sortOrder string) (*models.SavedFilter, error) {
 	if sortBy == "" {
 		sortBy = "none"
 	}
@@ -48,7 +42,7 @@ func CreateSavedFilter(db *sql.DB, name, query, sortBy, sortOrder string) (*Save
 	}
 	id, _ := result.LastInsertId()
 
-	var f SavedFilter
+	var f models.SavedFilter
 	err = db.QueryRow("SELECT id, name, query, COALESCE(sort_by, 'none'), COALESCE(sort_order, 'desc'), created_at, updated_at FROM saved_filters WHERE id = ?", id).
 		Scan(&f.ID, &f.Name, &f.Query, &f.SortBy, &f.SortOrder, &f.CreatedAt, &f.UpdatedAt)
 	if err != nil {
@@ -57,7 +51,8 @@ func CreateSavedFilter(db *sql.DB, name, query, sortBy, sortOrder string) (*Save
 	return &f, nil
 }
 
-func UpdateSavedFilter(db *sql.DB, id int64, name, query, sortBy, sortOrder string) (*SavedFilter, error) {
+// UpdateSavedFilter modifies an existing filter preset and returns the updated record.
+func UpdateSavedFilter(db *sql.DB, id int64, name, query, sortBy, sortOrder string) (*models.SavedFilter, error) {
 	if sortBy == "" {
 		sortBy = "none"
 	}
@@ -72,7 +67,7 @@ func UpdateSavedFilter(db *sql.DB, id int64, name, query, sortBy, sortOrder stri
 		return nil, fmt.Errorf("failed to update saved filter: %w", err)
 	}
 
-	var f SavedFilter
+	var f models.SavedFilter
 	err = db.QueryRow("SELECT id, name, query, COALESCE(sort_by, 'none'), COALESCE(sort_order, 'desc'), created_at, updated_at FROM saved_filters WHERE id = ?", id).
 		Scan(&f.ID, &f.Name, &f.Query, &f.SortBy, &f.SortOrder, &f.CreatedAt, &f.UpdatedAt)
 	if err != nil {
@@ -81,6 +76,7 @@ func UpdateSavedFilter(db *sql.DB, id int64, name, query, sortBy, sortOrder stri
 	return &f, nil
 }
 
+// DeleteSavedFilter removes a filter preset by ID.
 func DeleteSavedFilter(db *sql.DB, id int64) error {
 	result, err := db.Exec("DELETE FROM saved_filters WHERE id = ?", id)
 	if err != nil {
