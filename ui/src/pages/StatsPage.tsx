@@ -79,8 +79,6 @@ const CATEGORY_DISPLAY: Record<string, { title: string; titleFav: string; color:
   general: { title: 'Top Tags', titleFav: 'Most Favorited Tags', color: '#60a5fa', icon: '🏷️' },
 };
 
-const DEFAULT_VISIBLE = 10;
-
 // --- Sub-Components ---
 
 const KPICard: React.FC<{
@@ -186,16 +184,14 @@ const TagLeaderboardColumn: React.FC<{
   color: string;
   icon: string;
 }> = ({ title, titleFav, entries, entriesFav, color, icon }) => {
-  const [expanded, setExpanded] = useState(false);
   const [sortMode, setSortMode] = useState<'count' | 'favorites'>('count');
 
   const activeEntries = sortMode === 'favorites' ? entriesFav : entries;
   const activeTitle = sortMode === 'favorites' ? titleFav : title;
-  const visible = expanded ? activeEntries : activeEntries.slice(0, DEFAULT_VISIBLE);
 
   return (
     <div className="bg-[#1c1c24] border border-[#2a2a35] rounded-xl p-5 flex flex-col">
-      <div className="flex items-center gap-2 mb-4">
+      <div className="flex items-center gap-2 mb-4 shrink-0">
         <span className="text-base">{icon}</span>
         <h3 className="font-bold text-sm text-gray-200 flex-1 truncate">{activeTitle}</h3>
         <SortToggle mode={sortMode} onChange={setSortMode} />
@@ -204,44 +200,33 @@ const TagLeaderboardColumn: React.FC<{
       {activeEntries.length === 0 ? (
         <p className="text-sm text-gray-500">{sortMode === 'favorites' ? 'No favorites yet.' : 'No data yet.'}</p>
       ) : (
-        <>
-          <ul className="space-y-1 flex-1">
-            {visible.map((entry, i) => {
-              const query = sortMode === 'favorites' ? `${entry.name} favorite:true` : entry.name;
-              return (
-                <li key={entry.name}>
-                  <Link
-                    to={`/?tags=${encodeURIComponent(query)}`}
-                    className="flex items-center gap-2 py-1.5 px-2 rounded hover:bg-[#2a2a35] transition-colors group"
-                    title={`Search images for ${entry.name}${sortMode === 'favorites' ? ' (Favorites only)' : ''}`}
+        <ul className="space-y-1 overflow-y-auto max-h-[360px] pr-1">
+          {activeEntries.map((entry, i) => {
+            const query = sortMode === 'favorites' ? `${entry.name} favorite:true` : entry.name;
+            return (
+              <li key={entry.name}>
+                <Link
+                  to={`/?tags=${encodeURIComponent(query)}`}
+                  className="flex items-center gap-2 py-1.5 px-2 rounded hover:bg-[#2a2a35] transition-colors group"
+                  title={`Search images for ${entry.name}${sortMode === 'favorites' ? ' (Favorites only)' : ''}`}
+                >
+                  <span className="text-xs text-gray-600 w-5 text-right shrink-0 font-mono">
+                    {i + 1}
+                  </span>
+                  <span
+                    className="text-sm font-medium truncate flex-1 group-hover:underline flex items-center gap-1"
+                    style={{ color }}
                   >
-                    <span className="text-xs text-gray-600 w-5 text-right shrink-0 font-mono">
-                      {i + 1}
-                    </span>
-                    <span
-                      className="text-sm font-medium truncate flex-1 group-hover:underline flex items-center gap-1"
-                      style={{ color }}
-                    >
-                      {entry.name}
-                    </span>
-                    <span className="text-xs text-gray-400 group-hover:text-gray-200 shrink-0 bg-[#2a2a35] group-hover:bg-[#3a3a45] px-2 py-0.5 rounded-full transition-colors font-mono">
-                      {sortMode === 'favorites' ? `♥ ${entry.count}` : entry.count.toLocaleString()}
-                    </span>
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
-          {activeEntries.length > DEFAULT_VISIBLE && (
-            <button
-              type="button"
-              onClick={() => setExpanded(!expanded)}
-              className="mt-3 text-xs text-[#60a5fa] hover:text-[#93c5fd] transition-colors self-start"
-            >
-              {expanded ? '← Show less' : `Show all ${activeEntries.length} →`}
-            </button>
-          )}
-        </>
+                    {entry.name}
+                  </span>
+                  <span className="text-xs text-gray-400 group-hover:text-gray-200 shrink-0 bg-[#2a2a35] group-hover:bg-[#3a3a45] px-2 py-0.5 rounded-full transition-colors font-mono">
+                    {sortMode === 'favorites' ? `♥ ${entry.count}` : entry.count.toLocaleString()}
+                  </span>
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
       )}
     </div>
   );
@@ -257,9 +242,6 @@ const PredictiveRatingColumn: React.FC<{
   selectedTag?: PredictiveTagEntry | null;
   onSelectTag?: (entry: PredictiveTagEntry) => void;
 }> = ({ title, ratingKey, entries, icon, headerClass, badgeClass, selectedTag, onSelectTag }) => {
-  const [expanded, setExpanded] = useState(false);
-  const visible = expanded ? entries : entries.slice(0, DEFAULT_VISIBLE);
-
   const getPercentage = (entry: PredictiveTagEntry) => {
     switch (ratingKey) {
       case 'g': return entry.general_pct;
@@ -271,7 +253,7 @@ const PredictiveRatingColumn: React.FC<{
 
   return (
     <div className="bg-[#1c1c24] border border-[#2a2a35] rounded-xl p-5 flex flex-col">
-      <div className="flex items-center gap-2 mb-4">
+      <div className="flex items-center gap-2 mb-4 shrink-0">
         <span className="text-base">{icon}</span>
         <h3 className={`font-bold text-sm ${headerClass} flex-1 truncate`}>{title}</h3>
       </div>
@@ -279,49 +261,38 @@ const PredictiveRatingColumn: React.FC<{
       {entries.length === 0 ? (
         <p className="text-sm text-gray-500">Not enough data (min 5 occurrences required).</p>
       ) : (
-        <>
-          <ul className="space-y-1 flex-1">
-            {visible.map((entry, i) => {
-              const pct = getPercentage(entry);
-              const isSelected = selectedTag?.name === entry.name;
-              return (
-                <li
-                  key={entry.name}
-                  onClick={() => onSelectTag && onSelectTag(entry)}
-                  className={`flex items-center gap-2 py-1.5 px-2 rounded cursor-pointer transition-colors ${
-                    isSelected
-                      ? 'bg-[#2a2a35] border border-[#60a5fa]/50'
-                      : 'hover:bg-[#2a2a35]/50'
-                  }`}
+        <ul className="space-y-1 overflow-y-auto max-h-[360px] pr-1">
+          {entries.map((entry, i) => {
+            const pct = getPercentage(entry);
+            const isSelected = selectedTag?.name === entry.name;
+            return (
+              <li
+                key={entry.name}
+                onClick={() => onSelectTag && onSelectTag(entry)}
+                className={`flex items-center gap-2 py-1.5 px-2 rounded cursor-pointer transition-colors ${
+                  isSelected
+                    ? 'bg-[#2a2a35] border border-[#60a5fa]/50'
+                    : 'hover:bg-[#2a2a35]/50'
+                }`}
+              >
+                <span className="text-xs text-gray-600 w-5 text-right shrink-0 font-mono">
+                  {i + 1}
+                </span>
+                <span className="text-sm text-gray-200 truncate flex-1" title={entry.name}>
+                  {entry.name}
+                </span>
+                <span
+                  className={`text-xs font-semibold px-2 py-0.5 rounded-full border shrink-0 ${badgeClass}`}
                 >
-                  <span className="text-xs text-gray-600 w-5 text-right shrink-0 font-mono">
-                    {i + 1}
-                  </span>
-                  <span className="text-sm text-gray-200 truncate flex-1" title={entry.name}>
-                    {entry.name}
-                  </span>
-                  <span
-                    className={`text-xs font-semibold px-2 py-0.5 rounded-full border shrink-0 ${badgeClass}`}
-                  >
-                    {pct.toFixed(1)}%
-                  </span>
-                  <span className="text-[10px] text-gray-600 shrink-0 w-8 text-right" title="Total occurrences">
-                    ×{entry.total_count}
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
-          {entries.length > DEFAULT_VISIBLE && (
-            <button
-              type="button"
-              onClick={() => setExpanded(!expanded)}
-              className="mt-3 text-xs text-[#60a5fa] hover:text-[#93c5fd] transition-colors self-start"
-            >
-              {expanded ? '← Show less' : `Show all ${entries.length} →`}
-            </button>
-          )}
-        </>
+                  {pct.toFixed(1)}%
+                </span>
+                <span className="text-[10px] text-gray-600 shrink-0 w-8 text-right" title="Total occurrences">
+                  ×{entry.total_count}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
       )}
     </div>
   );
