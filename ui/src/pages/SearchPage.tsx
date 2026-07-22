@@ -105,6 +105,14 @@ const extractPaletteColors = (query: string): string[] => {
   return [];
 };
 
+const extractPaletteThreshold = (query: string): number => {
+  const match = query.match(/(?:^|\s)palette_threshold:(\d+(?:\.\d+)?)(?:\s|$)/);
+  if (match) return parseFloat(match[1]);
+  const colMatch = query.match(/(?:^|\s)color_threshold:(\d+(?:\.\d+)?)(?:\s|$)/);
+  if (colMatch) return parseFloat(colMatch[1]);
+  return 18;
+};
+
 // Reusable Dual Slider Component styled to match your old UI perfectly
 const sliderClasses = `absolute w-full appearance-none bg-transparent pointer-events-none z-20 focus:outline-none 
 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:pointer-events-auto [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:bg-[#60a5fa] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer 
@@ -196,6 +204,7 @@ const SearchPage: React.FC = () => {
   const [color, setColor] = useState<string>('#000000');
   const [hasColor, setHasColor] = useState(false);
   const [vibePalette, setVibePalette] = useState<string[]>([]);
+  const [paletteThreshold, setPaletteThreshold] = useState<number>(18);
   const [savedPalettes, setSavedPalettes] = useState<SavedPalette[]>([]);
   const [isSavingPalette, setIsSavingPalette] = useState(false);
   const [newPaletteName, setNewPaletteName] = useState('');
@@ -258,6 +267,8 @@ const SearchPage: React.FC = () => {
     setBrightness(b || [0, 255]);
 
     const extractedColors = extractPaletteColors(tagsQuery);
+    const extractedThreshold = extractPaletteThreshold(tagsQuery);
+    setPaletteThreshold(extractedThreshold);
     if (extractedColors.length > 0) {
       setVibePalette(extractedColors);
       setHasColor(true);
@@ -478,14 +489,19 @@ const SearchPage: React.FC = () => {
     }
   };
 
-  const handleApplyPalette = (colors: string[]) => {
+  const handleApplyPalette = (colors: string[], threshold?: number) => {
+    const threshToUse = threshold !== undefined ? threshold : paletteThreshold;
     setVibePalette(colors);
     setHasColor(colors.length > 0);
+    if (threshold !== undefined) {
+      setPaletteThreshold(threshold);
+    }
 
     let tokens = tagsQuery.split(/\s+/).filter(Boolean);
-    tokens = tokens.filter((t) => !t.startsWith('palette:') && !t.startsWith('color:'));
+    tokens = tokens.filter((t) => !t.startsWith('palette:') && !t.startsWith('color:') && !t.startsWith('palette_threshold:') && !t.startsWith('color_threshold:'));
     if (colors.length > 0) {
       tokens.push(`palette:${colors.join(',')}`);
+      tokens.push(`palette_threshold:${threshToUse}`);
     }
     const newQuery = tokens.join(' ');
 
@@ -493,6 +509,13 @@ const SearchPage: React.FC = () => {
     debounceRef.current = window.setTimeout(() => {
       updateUrlParams(newQuery);
     }, 150);
+  };
+
+  const handleThresholdChange = (newThreshold: number) => {
+    setPaletteThreshold(newThreshold);
+    if (vibePalette.length > 0) {
+      handleApplyPalette(vibePalette, newThreshold);
+    }
   };
 
   const handleColorChange = (newColor: string) => {
@@ -991,6 +1014,39 @@ const SearchPage: React.FC = () => {
                     </button>
                   )}
                 </div>
+
+                {/* Palette Match Strictness Slider */}
+                {vibePalette.length > 0 && (
+                  <div className="mt-3.5 pt-3 border-t border-[#2a2a35]/60">
+                    <div className="flex items-center justify-between text-xs mb-1.5">
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-semibold text-gray-300">Strictness:</span>
+                        <span className="font-mono text-[#60a5fa]">{paletteThreshold}</span>
+                        <span className="text-[10px] text-gray-400">
+                          ({paletteThreshold <= 12 ? 'Hyper Exact' : paletteThreshold <= 18 ? 'Strict' : paletteThreshold <= 26 ? 'Balanced' : 'Loose'})
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleThresholdChange(18)}
+                        disabled={paletteThreshold === 18}
+                        className="text-gray-400 hover:text-red-400 transition-colors disabled:opacity-30 cursor-pointer disabled:cursor-not-allowed text-[11px]"
+                      >
+                        Reset
+                      </button>
+                    </div>
+                    <input
+                      type="range"
+                      min={6}
+                      max={38}
+                      step={1}
+                      value={paletteThreshold}
+                      onChange={(e) => handleThresholdChange(Number(e.target.value))}
+                      className="w-full accent-[#60a5fa] bg-[#15151a] h-1.5 rounded-lg cursor-pointer"
+                      title={`Color Match Threshold: ${paletteThreshold} Delta E`}
+                    />
+                  </div>
+                )}
 
                 {isSavingPalette && (
                   <form onSubmit={handleSavePalette} className="mt-2.5 p-2 bg-[#15151a] border border-[#2a2a35] rounded flex items-center gap-2">

@@ -137,9 +137,16 @@ func createTables(db *sql.DB) error {
 
 	-- Index for faster lookups when we doing math on colors columns
 	CREATE INDEX IF NOT EXISTS idx_image_colors_rgb ON image_colors(r, g, b);
+	CREATE INDEX IF NOT EXISTS idx_image_colors_file_id ON image_colors(file_id);
 
 	-- Speeds up "Missing Data", "Duplicate", and "Organized" queries
 	CREATE INDEX IF NOT EXISTS idx_files_status ON files(active_metadata_id, hasDuplicate, organized);
+	CREATE INDEX IF NOT EXISTS idx_files_favorite ON files(isFavorite);
+	CREATE INDEX IF NOT EXISTS idx_files_created_at ON files(created_at);
+
+	-- Speeds up tag searches and reverse join lookups
+	CREATE INDEX IF NOT EXISTS idx_record_tags_tag_id ON record_tags(tag_id);
+	CREATE INDEX IF NOT EXISTS idx_metadata_records_filename ON metadata_records(filename);
 	`
 	_, err := db.Exec(schema)
 	return err

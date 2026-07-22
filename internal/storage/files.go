@@ -88,6 +88,194 @@ func GetImageByID(db *sql.DB, fileID int64, includeMatches bool) (*models.Image,
 	return &img, nil
 }
 
+// GetImagesByIDs fetches multiple image records in batch using minimal SQL queries.
+func GetImagesByIDs(db *sql.DB, fileIDs []int64) ([]models.Image, error) {
+	if len(fileIDs) == 0 {
+		return []models.Image{}, nil
+	}
+
+	imagesMap := make(map[int64]*models.Image, len(fileIDs))
+	chunkSize := 500
+
+	for i := 0; i < len(fileIDs); i += chunkSize {
+		end := i + chunkSize
+		if end > len(fileIDs) {
+			end = len(fileIDs)
+		}
+		chunk := fileIDs[i:end]
+
+		placeholders := make([]string, len(chunk))
+		args := make([]interface{}, len(chunk))
+		for j, id := range chunk {
+			placeholders[j] = "?"
+			args[j] = id
+		}
+
+		query := fmt.Sprintf("SELECT id, filename, hash, isFavorite, organized, active_metadata_id, IFNULL(thumbnail_path, ''), hasDuplicate, image_width, image_height, file_size FROM files WHERE id IN (%s)", strings.Join(placeholders, ","))
+		rows, err := db.Query(query, args...)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch files batch: %w", err)
+		}
+
+		var activeMetaIDs []int64
+		metaToFiles := make(map[int64][]int64)
+
+		for rows.Next() {
+			var img models.Image
+			var activeMetadataID sql.NullInt64
+			var hasDuplicate sql.NullInt64
+
+			if err := rows.Scan(&img.ID, &img.FileName, &img.Hash, &img.IsFavorite, &img.Organized, &activeMetadataID, &img.ThumbnailPath, &hasDuplicate, &img.ImageWidth, &img.ImageHeight, &img.FileSize); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("failed to scan file row: %w", err)
+			}
+
+			if hasDuplicate.Valid {
+				val := hasDuplicate.Int64
+				img.HasDuplicate = &val
+			}
+
+			imgCopy := img
+			imagesMap[img.ID] = &imgCopy
+
+			if activeMetadataID.Valid {
+				mID := activeMetadataID.Int64
+				metaToFiles[mID] = append(metaToFiles[mID], img.ID)
+				activeMetaIDs = append(activeMetaIDs, mID)
+			}
+		}
+		rows.Close()
+
+		if len(activeMetaIDs) > 0 {
+			// Fetch metadata records for activeMetaIDs in batch
+			metaPlaceholders := make([]string, len(activeMetaIDs))
+			metaArgs := make([]interface{}, len(activeMetaIDs))
+			for j, mID := range activeMetaIDs {
+				metaPlaceholders[j] = "?"
+				metaArgs[j] = mID
+			}
+
+			metaQuery := fmt.Sprintf(`
+				SELECT id, provider_id, score, file_url, large_file_url, rating, source,
+				       IFNULL(original_post_id, ''), IFNULL(original_source, '')
+				FROM metadata_records 
+				WHERE id IN (%s)`, strings.Join(metaPlaceholders, ","))
+
+			mRows, err := db.Query(metaQuery, metaArgs...)
+			if err != nil {
+				return nil, fmt.Errorf("failed to query batch metadata records: %w", err)
+			}
+
+			type metaRowData struct {
+				id   int64
+				post models.Post
+			}
+			var metaList []metaRowData
+
+			for mRows.Next() {
+				var recordID int64
+				var providerID string
+				var score sql.NullFloat64
+				var post models.Post
+				var rating, source, fileURL, largeFileURL sql.NullString
+
+				if err := mRows.Scan(
+					&recordID, &providerID, &score, &fileURL, &largeFileURL, &rating,
+					&source, &post.OriginalPostID, &post.OriginalSource,
+				); err != nil {
+					mRows.Close()
+					return nil, fmt.Errorf("failed to scan batch metadata row: %w", err)
+				}
+
+				fmt.Sscanf(providerID, "%d", &post.ID)
+				post.FileURL = fileURL.String
+				post.LargeFileURL = largeFileURL.String
+				post.Rating = rating.String
+				post.Source = source.String
+
+				// Initialize slices
+				post.TagsArtist = make([]string, 0)
+				post.TagsCharacters = make([]string, 0)
+				post.TagsCopyright = make([]string, 0)
+				post.TagsGeneral = make([]string, 0)
+				post.TagsMeta = make([]string, 0)
+
+				metaList = append(metaList, metaRowData{id: recordID, post: post})
+			}
+			mRows.Close()
+
+			// Batch fetch tags for all activeMetaIDs
+			tagQuery := fmt.Sprintf(`
+				SELECT rt.metadata_id, t.name, t.category 
+				FROM tags t
+				JOIN record_tags rt ON t.id = rt.tag_id
+				WHERE rt.metadata_id IN (%s)
+			`, strings.Join(metaPlaceholders, ","))
+
+			tRows, err := db.Query(tagQuery, metaArgs...)
+			if err != nil {
+				return nil, fmt.Errorf("failed to query batch tags: %w", err)
+			}
+
+			tagsByMeta := make(map[int64][][2]string)
+			for tRows.Next() {
+				var mID int64
+				var name, category string
+				if err := tRows.Scan(&mID, &name, &category); err == nil {
+					tagsByMeta[mID] = append(tagsByMeta[mID], [2]string{name, category})
+				}
+			}
+			tRows.Close()
+
+			// Attach tags and assign posts to images
+			for _, item := range metaList {
+				p := item.post
+				for _, tagPair := range tagsByMeta[item.id] {
+					name, cat := tagPair[0], tagPair[1]
+					switch cat {
+					case "artist":
+						p.TagsArtist = append(p.TagsArtist, name)
+					case "character":
+						p.TagsCharacters = append(p.TagsCharacters, name)
+					case "copyright":
+						p.TagsCopyright = append(p.TagsCopyright, name)
+					case "general":
+						p.TagsGeneral = append(p.TagsGeneral, name)
+					case "meta":
+						p.TagsMeta = append(p.TagsMeta, name)
+					}
+				}
+				p.TagCountArtist = len(p.TagsArtist)
+				p.TagCountCharacter = len(p.TagsCharacters)
+				p.TagCountCopyright = len(p.TagsCopyright)
+				p.TagCountGeneral = len(p.TagsGeneral)
+				p.TagCountMeta = len(p.TagsMeta)
+				p.TagCount = p.TagCountArtist + p.TagCountCharacter + p.TagCountCopyright + p.TagCountGeneral + p.TagCountMeta
+
+				for _, fID := range metaToFiles[item.id] {
+					if img, exists := imagesMap[fID]; exists {
+						pCopy := p
+						pCopy.ImageWidth = img.ImageWidth
+						pCopy.ImageHeight = img.ImageHeight
+						pCopy.FileSize = int(img.FileSize)
+						img.MainData = &pCopy
+					}
+				}
+			}
+		}
+	}
+
+	// Preserve exact ordering requested in fileIDs
+	result := make([]models.Image, 0, len(fileIDs))
+	for _, id := range fileIDs {
+		if img, exists := imagesMap[id]; exists {
+			result = append(result, *img)
+		}
+	}
+
+	return result, nil
+}
+
 // populateTags fetches tags for a specific metadata record and organizes them into the Post struct.
 func populateTags(db *sql.DB, metadataID int64, post *models.Post) error {
 	query := `
