@@ -2,6 +2,15 @@
 
 AGO2 is a locally hosted anime gallery manager that helps you organize, search, and enrich your image collection. It features powerful integrations with Danbooru to automatically fetch high-quality tags, ratings, and metadata for your images.
 
+![Gallery View](assets/gallery_view.png)
+*The main gallery view featuring advanced search, tags, and color palette filtering.*
+
+![Comparison View](assets/comparison_view.png)
+*Comparing local files against high-quality Danbooru sources for easy replacement and metadata tagging.*
+
+![Stats View](assets/stats_view.png)
+*A look at the built-in library statistics and data.*
+
 ## Features
 
 - **Smart Organization**: Automatically detects duplicate images via hashing and helps keep your collection organized.
@@ -58,3 +67,20 @@ To run this project locally, you will need:
 ## License
 
 This project is licensed under the [MIT License](LICENSE).
+
+## Credits
+
+A special thanks to the incredibly talented artists whose work is featured in the screenshots above:
+- mano_aaa
+- swkl:d
+- kana_(knmoca)
+- dodo_(dodobo)
+- dino_(dinoartforame)
+- soy_chicken
+- shade_of_a_cat
+- ji_dao_ji
+- fishofthelakes
+- meinoss
+- world_(1257843324)
+- quasarcake
+- shiej007
