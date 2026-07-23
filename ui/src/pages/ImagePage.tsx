@@ -337,6 +337,22 @@ const ImagePage: React.FC = () => {
             </div>
           </div>
 
+          {/* Duplicate Warning */}
+          {imageData.has_duplicate && (
+            <div className="mb-4 p-3 bg-[#f59e0b]/10 border border-[#f59e0b]/30 rounded-lg">
+              <p className="text-xs font-semibold text-[#f59e0b] mb-1">⚠ Duplicate Image</p>
+              <p className="text-xs text-gray-400">
+                This image is a duplicate of{' '}
+                <a
+                  href={`/image/${imageData.has_duplicate}`}
+                  className="text-[#60a5fa] hover:underline font-medium"
+                >
+                  Image #{imageData.has_duplicate}
+                </a>
+              </p>
+            </div>
+          )}
+
           <TagCategory title="Artist" tags={post.tags_artist} colorClass="text-[#fca5a5]" />
           <TagCategory title="Copyright" tags={post.tags_copyright} colorClass="text-[#c084fc]" />
           <TagCategory title="Character" tags={post.tags_character} colorClass="text-[#4ade80]" />

@@ -143,6 +143,7 @@ func createTables(db *sql.DB) error {
 	CREATE INDEX IF NOT EXISTS idx_files_status ON files(active_metadata_id, hasDuplicate, organized);
 	CREATE INDEX IF NOT EXISTS idx_files_favorite ON files(isFavorite);
 	CREATE INDEX IF NOT EXISTS idx_files_created_at ON files(created_at);
+	CREATE INDEX IF NOT EXISTS idx_files_hash ON files(hash);
 
 	-- Speeds up tag searches and reverse join lookups
 	CREATE INDEX IF NOT EXISTS idx_record_tags_tag_id ON record_tags(tag_id);

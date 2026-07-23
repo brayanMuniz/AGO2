@@ -52,6 +52,7 @@ func RegisterRoutes(mux *http.ServeMux, app *App) {
 	// Gallery processing
 	mux.HandleFunc("POST /api/process-gallery", app.handleProcessGallery)
 	mux.HandleFunc("GET /api/process-gallery/status", app.handleGetJobStatus)
+	mux.HandleFunc("POST /api/find-duplicates", app.handleFindDuplicates)
 
 	// Filters
 	mux.HandleFunc("GET /api/filters", app.handleGetSavedFilters)
